@@ -72,6 +72,13 @@ The long-report print test additionally needs poppler (`pdftotext`, `pdfinfo`, `
    this is not a direct PDF download. **Export findings CSV** exports the full project. Reports always cover the whole project
    regardless of workspace filters.
 
+## Hosted copy (GitHub Pages)
+
+A static build is published on the `gh-pages` branch, served at `https://buildbybradley.github.io/dilapidation-reporter/` once
+Pages is enabled (repo **Settings → Pages → Build and deployment → Deploy from a branch → `gh-pages` / `(root)`**). It is HTTPS, so the live
+camera works on a phone. Data stays in each visitor's own browser; there is no server. To republish after changing the code:
+`npm run build:pages`, then push the contents of `dist-pages/` (plus an empty `.nojekyll` file) to the `gh-pages` branch.
+
 ## Where data lives, backups
 
 * Everything is stored in this browser’s **IndexedDB** database `dilapidation-inspector` (blobs for plans/photos, records for the rest).

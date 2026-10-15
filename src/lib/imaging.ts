@@ -99,7 +99,22 @@ export async function processPhoto(file: Blob, filename: string, o: Opts = {}): 
   } finally { bmp.close(); }
 }
 
-export function downloadBlob(blob: Blob, filename: string) {
+declare global { interface Window { claude?: { use?: (name: string) => Promise<unknown> } } }
+
+/** True when running inside a locked-down host frame (e.g. a hosted preview) that has no window.print() and no direct downloads. */
+export const inHostFrame = () => typeof window !== 'undefined' && typeof window.claude?.use === 'function';
+
+/** Save a generated file. Uses the host's confirmed-download capability when present, otherwise a normal download link. */
+export async function downloadBlob(blob: Blob, filename: string): Promise<void> {
+  if (inHostFrame()) {
+    try {
+      const dl = (await window.claude!.use!('downloads')) as { save(r: { filename: string; data: Blob }): Promise<unknown> } | null;
+      if (dl) { await dl.save({ filename, data: blob }); return; }
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'declined') return;
+      throw new Error(`The file could not be saved here (${(e as { message?: string })?.message ?? 'unavailable'}).`);
+    }
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();

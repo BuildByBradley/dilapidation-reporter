@@ -9,6 +9,7 @@ export const locksSupported = () => typeof navigator !== 'undefined' && !!naviga
 export async function acquireProjectLock(projectId: string): Promise<LockHandle | null> {
   if (!locksSupported()) return { release() {} };
   return new Promise((resolve) => {
+    try {
     let release!: () => void;
     const held = new Promise<void>((r) => { release = r; });
     navigator.locks.request(`dilapidation-project:${projectId}`, { ifAvailable: true }, async (lock) => {
@@ -16,5 +17,6 @@ export async function acquireProjectLock(projectId: string): Promise<LockHandle 
       resolve({ release: () => release() });
       await held;
     }).catch(() => resolve({ release() {} }));
+    } catch { resolve({ release() {} }); } // locks unavailable in this frame: do not block editing
   });
 }

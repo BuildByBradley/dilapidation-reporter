@@ -15,7 +15,8 @@
     "lint": "eslint .",
     "test": "vitest",
     "test:e2e": "playwright test",
-    "test:e2e:dev": "node scripts/e2e-dev.mjs"
+    "test:e2e:dev": "node scripts/e2e-dev.mjs",
+    "build:pages": "vite build --base ./ --outDir dist-pages --emptyOutDir"
   },
   "dependencies": {
     "dexie": "^4.4.6",

@@ -3,7 +3,7 @@ import { go } from '../../app/App';
 import { fmtTime } from '../../components/ui';
 import { flushAll } from '../../data/flush';
 import * as repo from '../../data/repo';
-import { downloadBlob } from '../../lib/imaging';
+import { downloadBlob, inHostFrame } from '../../lib/imaging';
 import { insetBlob, planSnapshotBlob } from '../../lib/planSnapshot';
 import { buildCsv, buildReportModel, type ReportFinding, type ReportModel } from '../../lib/report';
 import { severityLabel, type Asset } from '../../lib/types';
@@ -114,7 +114,8 @@ export function ReportView({ projectId }: { projectId: string }) {
           {status.failed.length ? `Report incomplete: ${status.failed.length} item(s) failed to render` : complete ? 'Ready to print' : `Preparing images (${Math.min(status.loaded, total)}/${total})…`}
         </span>
         <button onClick={() => downloadBlob(new Blob([buildCsv(model)], { type: 'text/csv;charset=utf-8' }), `${p.name.replace(/[^\w.-]+/g, '_')}-findings.csv`)}>Export findings CSV</button>
-        <button className="primary" disabled={!complete} onClick={() => window.print()} title="Opens the print dialog — choose “Save as PDF”">Print / Save as PDF</button>
+        <button className="primary" disabled={!complete || inHostFrame()} onClick={() => window.print()} title={inHostFrame() ? 'Printing is not available in this hosted preview' : 'Opens the print dialog — choose “Save as PDF”'}>Print / Save as PDF</button>
+        {inHostFrame() && <span className="small muted">Printing is unavailable in this hosted preview — run the app locally to save a PDF.</span>}
       </div>
       {status.failed.length > 0 && <div className="banner warn no-print" role="alert">This report is incomplete and should not be issued: {status.failed.slice(0, 5).join('; ')}.</div>}
       <article className="report" data-testid="report">
