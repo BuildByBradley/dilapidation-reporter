@@ -49,6 +49,7 @@ export class ViewerEngine {
   private raf = 0;
   private lastFrame = 0;
   private reduced = false;
+  private insets = { top: 64, bottom: 40, side: 0 };
   private gestures: GestureTracker;
   private cleanup: (() => void)[] = [];
 
@@ -110,6 +111,9 @@ export class ViewerEngine {
     add('pointerdown', down); add('pointermove', move); add('pointerup', up); add('pointercancel', cancel);
     add('lostpointercapture', lost); add('wheel', wheel, { passive: false }); add('keydown', key);
     add('contextmenu', (e) => e.preventDefault());
+    // Touch taps on the canvas are fully handled via pointer events. Cancelling touchend stops the browser's follow-up
+    // synthetic click, which could otherwise land on UI that appeared under the finger (e.g. the bottom sheet).
+    add('touchend', (e) => { if (e.cancelable) e.preventDefault(); }, { passive: false });
     add('pointerleave', () => { if (this.hoverFloor) { this.hoverFloor = null; canvas.style.cursor = ''; this.invalidate(); } });
   }
   detach() {
@@ -157,7 +161,7 @@ export class ViewerEngine {
   private fitFor(m: ViewerMode, base: Camera): Camera {
     const ids = this.modeFloorIds(m);
     if (!ids.length || !this.w) return base;
-    return fitCamera(base, this.planesFor(ids), this.w, this.h, m.kind === 'overview3d' ? 0.86 : 0.92, { top: this.w < 760 ? 100 : 64, bottom: 40 });
+    return fitCamera(base, this.planesFor(ids), this.w, this.h, m.kind === 'overview3d' ? 0.86 : 0.92, this.insets);
   }
   private fitZoom() { return this.fitFor(this.mode, this.cam).zoom || 1; }
   private store(): Store | null { return this.mode.kind === 'isolated3d' ? this.nav3d : this.mode.kind === 'floor2d' ? this.nav2d : null; }
@@ -166,6 +170,9 @@ export class ViewerEngine {
     else this.store()?.set((this.mode as { floorId: string }).floorId, this.cam);
   }
   private mutate(fn: (c: Camera) => Camera) { this.tween = null; this.cam = fn(this.cam); this.persist(); this.invalidate(); this.events.change(); }
+
+  /** Space reserved by overlay UI (toolbar/tabs) so fitted content is never hidden behind it. */
+  setInsets(top: number, bottom: number, side = 0) { this.insets = { top, bottom, side }; }
 
   fit(immediate = false) {
     const target = this.fitFor(this.mode, this.cam);
@@ -433,5 +440,13 @@ export class ViewerEngine {
     if (!f?.image) return null;
     const s = this.size(f);
     return planeBounds(this.cam, s.W, s.H, this.elevationOf(floorId), this.w / 2, this.h / 2);
+  }
+
+  /** Diagnostics/tests: screen-space bounds of a floor's plane. */
+  planScreenBounds(floorId: string) {
+    const f = this.floors.find((x) => x.id === floorId);
+    if (!f?.image) return null;
+    const sz = this.size(f);
+    return planeBounds(this.cam, sz.W, sz.H, this.elevationOf(floorId), this.w / 2, this.h / 2);
   }
 }

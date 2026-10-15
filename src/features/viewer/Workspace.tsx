@@ -21,6 +21,20 @@ import { ViewerPane } from './ViewerPane';
 import type { Draft } from './engine';
 
 type LockState = 'pending' | 'held' | 'readonly';
+type Drawer = null | 'top' | 'left' | 'right';
+
+/** Phone / small-tablet layout: the plan fills the screen and everything else lives behind edge tabs. */
+const COMPACT_QUERY = '(max-width: 900px)';
+function useCompact() {
+  const [c, setC] = useState(() => typeof window !== 'undefined' && window.matchMedia(COMPACT_QUERY).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(COMPACT_QUERY);
+    const on = () => setC(mq.matches);
+    mq.addEventListener('change', on); on();
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  return c;
+}
 
 export function Workspace({ projectId }: { projectId: string }) {
   const toast = useToast();
@@ -44,6 +58,9 @@ export function Workspace({ projectId }: { projectId: string }) {
   const [saving, setSaving] = useState(false);
   const [discard, setDiscard] = useState<null | (() => void)>(null);
   const [lock, setLock] = useState<LockState>('pending');
+  const compact = useCompact();
+  const [drawer, setDrawer] = useState<Drawer>(null);
+  const [sheetOpen, setSheetOpen] = useState(true);
   const lockRef = useRef<LockHandle | null>(null);
   const lastCategory = useRef('');
 
@@ -87,6 +104,8 @@ export function Workspace({ projectId }: { projectId: string }) {
   useEffect(() => {
     if (currentFloorId && floors.length && !floorMap.get(currentFloorId)?.planAssetId) setViewer({ kind: 'overview3d' });
   }, [floors, currentFloorId, floorMap]);
+
+  useEffect(() => { if (selectedId || draft || interaction.kind !== 'navigate') { setSheetOpen(true); setDrawer(null); } }, [selectedId, draft, interaction.kind]);
 
   const cancelPlacement = useCallback(() => { setInteraction({ kind: 'navigate' }); setDraft(null); setForm(emptyForm(lastCategory.current)); }, []);
   const guardDiscard = (proceed: () => void) => { if (formDirty && draft) setDiscard(() => proceed); else proceed(); };
@@ -168,27 +187,36 @@ export function Workspace({ projectId }: { projectId: string }) {
   const relocFinding = interaction.kind === 'relocatePin' ? findings.find((f) => f.id === interaction.findingId) : undefined;
   const reviewCount = findings.filter((f) => f.locationNeedsReview).length;
 
-  return (
-    <div className="page workspace">
-      <header className="topbar">
-        <button className="link" onClick={leave} aria-label="Back to projects">← Projects</button>
-        <h1 title={project.name}>{project.name}</h1>
-        <SaveIndicator />
-        <span className="spacer" />
-        <button onClick={toggle2D} aria-pressed={viewer.kind === 'floor2d'}>{viewer.kind === 'floor2d' ? '3D view' : '2D view'}</button>
-        <button className="primary" onClick={openReport}>Report</button>
-        <div className="menu">
-          <button aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>Project ▾</button>
-          {menuOpen && (
-            <div className="menu-list" role="menu" onClick={() => setMenuOpen(false)}>
-              <button role="menuitem" onClick={() => setShowDetails(true)}>Project details</button>
-              <button role="menuitem" onClick={() => setShowCats(true)}>Categories</button>
-              <button role="menuitem" onClick={backup}>Back up project</button>
-              <button role="menuitem" onClick={() => repo.duplicateProject(projectId).then(() => toast('ok', 'Project duplicated')).catch((e) => toast('error', String(e)))}>Duplicate project</button>
-            </div>
-          )}
-        </div>
-      </header>
+  const viewerPane = (
+    <ViewerPane
+      floors={floors} findings={findings} categories={categories} mode={viewer} interaction={interaction} selectedId={selectedId} draft={draft} readOnly={readOnly} compact={compact}
+      onFloorPick={selectFloor} onSelect={selectFinding} onPlace={onPlace} onEscape={onEscape} onReturn={toOverview} onToggle2D={toggle2D} onTogglePlace={togglePlace}
+      onNotice={(t) => toast('info', t)}
+    />
+  );
+  const headerContent = (
+    <>
+      <button className="link" onClick={leave} aria-label="Back to projects">← Projects</button>
+      <h1 title={project.name}>{project.name}</h1>
+      <SaveIndicator />
+      <span className="spacer" />
+      <button onClick={() => { setDrawer(null); toggle2D(); }} aria-pressed={viewer.kind === 'floor2d'}>{viewer.kind === 'floor2d' ? '3D view' : '2D view'}</button>
+      <button className="primary" onClick={openReport}>Report</button>
+      <div className="menu">
+        <button aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>Project ▾</button>
+        {menuOpen && (
+          <div className="menu-list" role="menu" onClick={() => { setMenuOpen(false); setDrawer(null); }}>
+            <button role="menuitem" onClick={() => setShowDetails(true)}>Project details</button>
+            <button role="menuitem" onClick={() => setShowCats(true)}>Categories</button>
+            <button role="menuitem" onClick={backup}>Back up project</button>
+            <button role="menuitem" onClick={() => repo.duplicateProject(projectId).then(() => toast('ok', 'Project duplicated')).catch((e) => toast('error', String(e)))}>Duplicate project</button>
+          </div>
+        )}
+      </div>
+    </>
+  );
+  const banners = (
+    <>
       {readOnly && (
         <div className="banner warn" role="alert" data-testid="readonly-banner">
           This project is open for editing in another tab or window, so this tab is <strong>read-only</strong> to avoid overwriting changes. <button onClick={retryLock}>Try again</button>
@@ -196,44 +224,30 @@ export function Workspace({ projectId }: { projectId: string }) {
       )}
       {!locksSupported() && <div className="banner warn small">This browser cannot prevent the same project being edited in two tabs. Keep it open in one tab only.</div>}
       {reviewCount > 0 && <div className="banner warn small" data-testid="review-banner">⚠ {reviewCount} finding{reviewCount === 1 ? ' needs' : 's need'} a location review after a plan replacement. They are flagged in the list and in the report.</div>}
-
-      <div className={`ws-body${panelOpen ? '' : ' panel-closed'}`}>
-        <aside className="ws-left">
-          <FloorList floors={floors} counts={counts} mode={viewer} readOnly={readOnly} onSelect={selectFloor} onImport={setImportFor} onOverview={toOverview} />
-        </aside>
-        <main className="ws-main">
-          <ViewerPane
-            floors={floors} findings={findings} categories={categories} mode={viewer} interaction={interaction} selectedId={selectedId} draft={draft} readOnly={readOnly}
-            onFloorPick={selectFloor} onSelect={selectFinding} onPlace={onPlace} onEscape={onEscape} onReturn={toOverview} onToggle2D={toggle2D} onTogglePlace={togglePlace}
-            onNotice={(t) => toast('info', t)}
-          />
-        </main>
-        <aside className="ws-right" aria-label="Findings panel">
-          <button className="sheet-toggle" aria-expanded={panelOpen} onClick={() => setPanelOpen(!panelOpen)}>{panelOpen ? 'Hide panel ▼' : `Findings (${findings.length}) ▲`}</button>
-          {panelOpen && (
-            <div className="ws-right-scroll">
-              {draft && placementFloor && draftAsset ? (
-                <PlacementPanel
-                  mode={interaction.kind === 'relocatePin' ? 'relocate' : 'new'} reference={relocFinding?.reference} floorName={placementFloor.name}
-                  u={draft.u} v={draft.v} assetWidth={draftAsset.width} assetHeight={draftAsset.height} categories={categories} form={form} setForm={setForm}
-                  onNudge={nudge} onConfirm={confirmPlacement} onCancel={() => guardDiscard(cancelPlacement)} busy={saving}
-                />
-              ) : placing ? (
-                <section className="editor"><h2>{interaction.kind === 'relocatePin' ? 'Relocate pin' : 'Add pin'}</h2><p>Tap the plan where the condition is. A target and magnifier will appear so you can fine-tune before saving.</p>
-                  {formDirty && <p className="small">Draft entries are kept until you cancel.</p>}<button onClick={() => guardDiscard(cancelPlacement)}>Cancel</button></section>
-              ) : selected ? (
-                <FindingEditor key={selected.id} finding={selected} categories={categories} floors={floors} photos={photos.filter((p) => p.findingId === selected.id)} readOnly={readOnly}
-                  onRelocate={() => startRelocate(selected.id)} onDeleted={() => setSelectedId(null)} onClose={() => setSelectedId(null)} />
-              ) : null}
-              <FindingsList findings={findings} floors={floors} categories={categories} selectedId={selectedId} onSelect={selectFinding} />
-            </div>
-          )}
-        </aside>
-      </div>
-      <div className="sr-only" aria-live="polite" data-testid="sr-selection">
-        {selected ? `Selected ${selected.reference}: ${selected.title}. ${floorMap.get(selected.floorId)?.name}. ${categories.find((c) => c.id === selected.categoryId)?.name}. Severity ${selected.severity.replace('_', ' ')}.` : ''}
-      </div>
-
+    </>
+  );
+  const editorNode =
+    draft && placementFloor && draftAsset ? (
+      <PlacementPanel
+        mode={interaction.kind === 'relocatePin' ? 'relocate' : 'new'} reference={relocFinding?.reference} floorName={placementFloor.name}
+        u={draft.u} v={draft.v} assetWidth={draftAsset.width} assetHeight={draftAsset.height} categories={categories} form={form} setForm={setForm}
+        onNudge={nudge} onConfirm={confirmPlacement} onCancel={() => guardDiscard(cancelPlacement)} busy={saving}
+      />
+    ) : placing ? (
+      <section className="editor"><h2>{interaction.kind === 'relocatePin' ? 'Relocate pin' : 'Add pin'}</h2><p>Tap the plan where the condition is. A target and magnifier will appear so you can fine-tune before saving.</p>
+        {formDirty && <p className="small">Draft entries are kept until you cancel.</p>}<button onClick={() => guardDiscard(cancelPlacement)}>Cancel</button></section>
+    ) : selected ? (
+      <FindingEditor key={selected.id} finding={selected} categories={categories} floors={floors} photos={photos.filter((p) => p.findingId === selected.id)} readOnly={readOnly}
+        onRelocate={() => startRelocate(selected.id)} onDeleted={() => setSelectedId(null)} onClose={() => setSelectedId(null)} />
+    ) : null;
+  const findingsList = <FindingsList findings={findings} floors={floors} categories={categories} selectedId={selectedId} onSelect={(id) => { setDrawer(null); selectFinding(id); setSheetOpen(true); }} />;
+  const srLive = (
+    <div className="sr-only" aria-live="polite" data-testid="sr-selection">
+      {selected ? `Selected ${selected.reference}: ${selected.title}. ${floorMap.get(selected.floorId)?.name}. ${categories.find((c) => c.id === selected.categoryId)?.name}. Severity ${selected.severity.replace('_', ' ')}.` : ''}
+    </div>
+  );
+  const dialogs = (
+    <>
       {importFor && <ImportDialog floors={floors} startFloorId={importFor} findingCounts={counts} onClose={() => setImportFor(null)} />}
       {showCats && <CategoriesDialog projectId={projectId} onClose={() => setShowCats(false)} />}
       {showDetails && <ProjectDetails project={project} onClose={() => setShowDetails(false)} readOnly={readOnly} />}
@@ -242,6 +256,78 @@ export function Workspace({ projectId }: { projectId: string }) {
           <p>You have drafted finding details that have not been saved. Discarding removes them.</p>
         </Confirm>
       )}
+    </>
+  );
+
+  if (compact) {
+    const floorName = currentFloorId ? floorMap.get(currentFloorId)?.name : undefined;
+    const tabLabel = floorName ? `${floorName} · ${viewer.kind === 'floor2d' ? '2D' : '3D'}` : project.name;
+    const attention = readOnly || reviewCount > 0;
+    const toggle = (d: Exclude<Drawer, null>) => { setMenuOpen(false); setDrawer((cur) => (cur === d ? null : d)); };
+    const sheetTitle = draft ? (interaction.kind === 'relocatePin' ? 'Relocate pin' : 'New finding') : placing ? 'Add pin' : selected ? `${selected.reference} — ${selected.title}` : '';
+    return (
+      <div className="page workspace compact" data-testid="workspace-compact">
+        <main className="ws-full">{viewerPane}</main>
+
+        <button className="edge-tab tab-top" aria-expanded={drawer === 'top'} aria-controls="drawer-top" onClick={() => toggle('top')}>
+          {attention ? '⚠ ' : ''}☰ {tabLabel} ▾
+        </button>
+        <button className="edge-tab tab-left" aria-expanded={drawer === 'left'} aria-controls="drawer-left" onClick={() => toggle('left')}>Floors ›</button>
+        <button className="edge-tab tab-right" aria-expanded={drawer === 'right'} aria-controls="drawer-right" onClick={() => toggle('right')}>‹ Findings {findings.length}</button>
+
+        {drawer && <div className="scrim" data-testid="scrim" onClick={() => { setDrawer(null); setMenuOpen(false); }} />}
+
+        <section id="drawer-top" className={`drawer drawer-top${drawer === 'top' ? ' open' : ''}`} aria-label="Menu" inert={drawer !== 'top'}>
+          <div className="topbar">{headerContent}</div>
+          {banners}
+          <p className="small muted drawer-help"><b>1 finger</b> drag sideways rotates (view angle is locked) · <b>2 fingers</b> pan and pinch zoom · in 2D one finger pans.</p>
+          <button className="drawer-close" onClick={() => { setDrawer(null); setMenuOpen(false); }}>Close ▴</button>
+        </section>
+        <aside id="drawer-left" className={`drawer drawer-left${drawer === 'left' ? ' open' : ''}`} aria-label="Floors" inert={drawer !== 'left'}>
+          <button className="drawer-close" onClick={() => setDrawer(null)}>‹ Close</button>
+          <FloorList floors={floors} counts={counts} mode={viewer} readOnly={readOnly}
+            onSelect={(id) => { setDrawer(null); selectFloor(id); }} onImport={(id) => { setDrawer(null); setImportFor(id); }} onOverview={() => { setDrawer(null); toOverview(); }} />
+        </aside>
+        <aside id="drawer-right" className={`drawer drawer-right${drawer === 'right' ? ' open' : ''}`} aria-label="Findings" inert={drawer !== 'right'}>
+          <button className="drawer-close" onClick={() => setDrawer(null)}>Close ›</button>
+          {findingsList}
+        </aside>
+
+        {editorNode && (
+          <section className={`ws-sheet${sheetOpen ? '' : ' collapsed'}`} aria-label="Finding details" data-testid="bottom-sheet">
+            <button className="sheet-head" aria-expanded={sheetOpen} onClick={() => setSheetOpen(!sheetOpen)}>
+              <span className="grabber" aria-hidden="true" /><span className="sheet-title">{sheetTitle}</span><span aria-hidden="true">{sheetOpen ? '▾' : '▴'}</span>
+            </button>
+            {sheetOpen && <div className="sheet-body">{editorNode}</div>}
+          </section>
+        )}
+        {srLive}
+        {dialogs}
+      </div>
+    );
+  }
+
+  return (
+    <div className="page workspace">
+      <header className="topbar">{headerContent}</header>
+      {banners}
+      <div className={`ws-body${panelOpen ? '' : ' panel-closed'}`}>
+        <aside className="ws-left">
+          <FloorList floors={floors} counts={counts} mode={viewer} readOnly={readOnly} onSelect={selectFloor} onImport={setImportFor} onOverview={toOverview} />
+        </aside>
+        <main className="ws-main">{viewerPane}</main>
+        <aside className="ws-right" aria-label="Findings panel">
+          <button className="sheet-toggle" aria-expanded={panelOpen} onClick={() => setPanelOpen(!panelOpen)}>{panelOpen ? 'Hide panel ▼' : `Findings (${findings.length}) ▲`}</button>
+          {panelOpen && (
+            <div className="ws-right-scroll">
+              {editorNode}
+              {findingsList}
+            </div>
+          )}
+        </aside>
+      </div>
+      {srLive}
+      {dialogs}
     </div>
   );
 }

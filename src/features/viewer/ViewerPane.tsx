@@ -10,6 +10,7 @@ export type ViewerPaneProps = {
   floors: Floor[]; findings: Finding[]; categories: Category[];
   mode: ViewerMode; interaction: InteractionMode; selectedId: string | null; draft: Draft;
   readOnly: boolean;
+  compact?: boolean;
   onFloorPick(id: string): void;
   onSelect(id: string): void;
   onPlace(floorId: string, uv: UV): void;
@@ -43,6 +44,7 @@ export function ViewerPane(p: ViewerPaneProps) {
   useEffect(() => {
     const canvas = canvasRef.current!, wrap = wrapRef.current!;
     engine.attach(canvas);
+    engine.setInsets(cbs.current.compact ? 48 : 64, cbs.current.compact ? 76 : 40, cbs.current.compact ? 44 : 0);
     window.__inspector = { engine };
     const measure = () => { const r = wrap.getBoundingClientRect(); engine.resize(Math.round(r.width), Math.round(r.height), window.devicePixelRatio || 1); };
     const ro = new ResizeObserver(measure);
@@ -75,6 +77,7 @@ export function ViewerPane(p: ViewerPaneProps) {
       prevPlans.current = planKey;
     }
   }, [planKey, engine, p.floors]);
+  useEffect(() => { engine.setInsets(p.compact ? 48 : 64, p.compact ? 76 : 40, p.compact ? 44 : 0); engine.fit(true); }, [engine, p.compact]);
   const catColour = useMemo(() => new Map(p.categories.map((c) => [c.id, c.colour])), [p.categories]);
   const pins: ViewPin[] = useMemo(() => p.findings.map((f) => ({ id: f.id, floorId: f.floorId, u: f.u, v: f.v, colour: catColour.get(f.categoryId) ?? '#555', reference: f.reference, needsReview: f.locationNeedsReview })), [p.findings, catColour]);
   useEffect(() => { engine.setPins(pins); }, [engine, pins]);

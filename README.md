@@ -62,6 +62,10 @@ The long-report print test additionally needs poppler (`pdftotext`, `pdfinfo`, `
    | keys (canvas focused) | ←/→ rotate, Shift+arrows pan, +/− zoom, F fit | arrows pan, +/− zoom, F fit |
 
    The camera elevation is fixed at 35.264°; no gesture can tilt, roll or invert the view.
+
+   **On a phone (screens ≤ 900 px wide)** the plan fills the whole screen and everything else is tucked behind edge tabs:
+   **Floors** (left), **Findings** (right), the project menu (top tab) and a bottom toolbar. Finding details and the new-pin form open as a
+   collapsible bottom sheet. Larger screens keep the three-column layout.
 4. **Pins** — choose **Add pin** (never created while navigating), tap the plan, check the crosshair and the 4× magnifier,
    fine-tune with the nudge buttons (1 source-image pixel; 10 with Shift) and save with a title and category.
    Relocation uses the same flow. In Navigate mode a tap selects a pin; overlapping pins open a chooser. `Esc` cancels.

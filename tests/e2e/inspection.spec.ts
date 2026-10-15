@@ -50,6 +50,8 @@ test.describe('pins (A09, A10)', () => {
     const w0 = (await state(page)).size.w;
     await page.setViewportSize({ width: 820, height: 640 });
     await page.waitForFunction((w) => (window as any).__inspector.engine.debugState().size.w !== w, w0);
+    // below 900px wide the app switches to the phone layout and rebuilds the viewer: wait until the floor is drawn again
+    await page.waitForFunction(() => { const s = (window as any).__inspector.engine.debugState(); return s.mode === 'floor2d' && s.visible.length === 1 && !s.animating; });
     await check('2D after resize');
   });
 
@@ -323,6 +325,8 @@ test('A23 pins stay aligned after resize and device-pixel-ratio changes', async 
     const w0 = (await state(page)).size.w;
     await page.setViewportSize({ width: 900, height: 700 });
     await page.waitForFunction((w) => (window as any).__inspector.engine.debugState().size.w !== w, w0);
+    // below 900px wide the app switches to the phone layout and rebuilds the viewer: wait until the floor is drawn again
+    await page.waitForFunction(() => { const s = (window as any).__inspector.engine.debugState(); return s.mode === 'floor2d' && s.visible.length === 1 && !s.animating; });
     const s = await screenOf(page, fid, f.u, f.v);
     // tapping the pin's drawn tip selects it => hit-testing agrees with drawing at this DPR/size
     await tap(page, s.x, s.y - 10);

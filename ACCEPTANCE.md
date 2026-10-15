@@ -78,3 +78,10 @@ ran only against the production build. Fixed and now covered by `npm run test:e2
 2. Imported plans were **not drawn** in dev: the viewer's redraw scheduler stayed marked "frame pending" after a remount. The new PDF test
    samples canvas pixels to prove something is actually drawn (large A1 vector sheet and a `/Rotate 90` A0 sheet).
 3. The camera dialog could leave a second camera stream running after a remount; stale requests now release their stream.
+
+## Phone layout (added after review feedback: "the floor plan must be the main working space")
+
+Screens ≤ 900 px wide now use a compact layout: full-screen plan, edge tabs for Floors / Findings / menu, bottom toolbar, collapsible
+bottom sheet for the editor. Covered by `tests/e2e/phone.spec.ts` (iPhone 13 viewport, touch emulation in Chromium): full-screen viewer,
+drawers hidden by default and open/close, placing and saving a pin from the sheet, and the fitted plan clear of the tabs/toolbar.
+Also fixed: a synthetic "ghost click" after a canvas tap could land on UI that appeared under the finger. Still **not tested on a real phone**.
