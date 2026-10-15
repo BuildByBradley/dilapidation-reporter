@@ -19,6 +19,8 @@ export type ViewerPaneProps = {
   onToggle2D(): void;
   onTogglePlace(): void;
   onNotice(text: string): void;
+  /** Optional second magnifier (the phone placement sheet), drawn with a wider crop for context. */
+  sheetMagnifier?: HTMLCanvasElement | null;
 };
 
 export function ViewerPane(p: ViewerPaneProps) {
@@ -88,7 +90,8 @@ export function ViewerPane(p: ViewerPaneProps) {
   useEffect(() => { engine.setMode(p.mode); setChooser(null); }, [engine, modeKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (p.draft && magRef.current) engine.drawMagnifier(magRef.current, p.draft.floorId, p.draft.u, p.draft.v);
-  }, [engine, p.draft, viewFloors]);
+    if (p.draft && p.sheetMagnifier) engine.drawMagnifier(p.sheetMagnifier, p.draft.floorId, p.draft.u, p.draft.v, 120);
+  }, [engine, p.draft, viewFloors, p.sheetMagnifier]);
 
   const modeFloorId = 'floorId' in p.mode ? p.mode.floorId : undefined;
   const floorName = modeFloorId ? p.floors.find((f) => f.id === modeFloorId)?.name : undefined;

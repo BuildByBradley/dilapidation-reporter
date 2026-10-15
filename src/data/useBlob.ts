@@ -1,14 +1,11 @@
-import { useEffect, useState } from 'react';
-import { getBlob } from './repo';
+import { db } from './db';
+import { useLive } from '../lib/useLive';
 
-/** Load a stored blob lazily (thumbnails/derivatives only — never originals during browsing). */
+/**
+ * Load a stored blob lazily (thumbnails/derivatives only — never originals during browsing).
+ * Live: if the image arrives later (cloud sync from another device), the component updates.
+ */
 export function useStoredBlob(id: string | undefined): Blob | undefined {
-  const [blob, setBlob] = useState<Blob>();
-  useEffect(() => {
-    let live = true;
-    setBlob(undefined);
-    if (id) getBlob(id).then((b) => { if (live) setBlob(b); });
-    return () => { live = false; };
-  }, [id]);
+  const [blob] = useLive(async () => (id ? (await db.blobs.get(id))?.data : undefined), [id], undefined as Blob | undefined);
   return blob;
 }

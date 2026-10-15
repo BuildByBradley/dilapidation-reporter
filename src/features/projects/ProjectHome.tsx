@@ -7,6 +7,7 @@ import { downloadBlob } from '../../lib/imaging';
 import { useLive } from '../../lib/useLive';
 import { loadSampleProject } from './sample';
 import { SaveIndicator } from '../../components/SaveIndicator';
+import { CloudPanel, CloudStatus } from '../../components/Cloud';
 
 type Details = Required<repo.ProjectInput>;
 const empty = (): Details => ({ name: '', siteName: '', address: '', client: '', inspector: '', inspectionDate: new Date().toISOString().slice(0, 10), reference: '', notes: '' });
@@ -44,7 +45,7 @@ function StoragePanel() {
   return (
     <details className="panel storage">
       <summary>Storage &amp; backups</summary>
-      <p>Everything is saved <strong>only in this browser</strong> (IndexedDB) — nothing is uploaded. Clearing site data, using a private window, or low-storage eviction can delete projects. Download a backup regularly.</p>
+      <p>Projects are saved in this browser (IndexedDB). Unless you are signed in to cloud sync, nothing is uploaded — and clearing site data, using a private window, or low-storage eviction can delete projects. Download a backup regularly.</p>
       <p>Used: {mb(info.usage)} of {mb(info.quota)} available. Persistent storage: {info.persisted === undefined ? 'not supported' : info.persisted ? 'granted' : 'not granted'}.
         {info.persisted === false && <> <button onClick={async () => { await navigator.storage.persist(); void refresh(); }}>Request persistent storage</button></>}</p>
     </details>
@@ -72,8 +73,10 @@ export function ProjectHome() {
         <span className="tag">Prototype</span>
         <span className="spacer" />
         <SaveIndicator />
+        <CloudStatus />
       </header>
       <main className="content">
+        <CloudPanel />
         <div className="toolbar-row">
           <button className="primary" onClick={() => setEditing('new')}>New inspection</button>
           <button onClick={() => fileRef.current?.click()}>Restore backup…</button>

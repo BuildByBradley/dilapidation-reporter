@@ -206,3 +206,36 @@ fieldset.warn { border: 1px solid var(--warn-line); background: var(--warn); bor
 @media (prefers-reduced-motion: reduce) { .drawer { transition: none; } }
 
 @media (max-width: 900px) { .toasts { bottom: auto; top: calc(56px + env(safe-area-inset-top, 0px)); right: 8px; left: 8px; max-width: none; } }
+
+/* cloud sync */
+.cloud-status { display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; color: var(--muted); min-height: 32px; padding: 0 10px; border-radius: 99px; background: transparent; }
+.cloud-status .dot { width: 9px; height: 9px; border-radius: 50%; background: #9aa5b1; }
+.cloud-status.ok .dot { background: var(--ok); } .cloud-status.busy .dot { background: #e0a100; }
+.cloud-status.warn { color: #8a5a00; } .cloud-status.warn .dot { background: #e0a100; }
+.cloud-status.bad { color: var(--danger); font-weight: 700; } .cloud-status.bad .dot { background: var(--danger); }
+.cloud-panel { margin-bottom: 14px; }
+.cloud-form { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; max-width: 560px; }
+.cloud-form .row { grid-column: 1 / -1; }
+@media (max-width: 600px) { .cloud-form { grid-template-columns: 1fr; } }
+
+/* pin placement: three steps (position → details → photos) */
+.place-step { border-top: 1px solid var(--line); padding: 10px 0 4px; }
+.place-step:first-of-type { border-top: 0; padding-top: 0; }
+.place-step h3 { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.step-no { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: .8rem; }
+.position-row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.dpad { display: grid; grid-template-columns: repeat(3, 52px); grid-template-rows: repeat(3, 52px); gap: 4px; }
+.dpad button { min-width: 0; font-size: 1.3rem; padding: 0; }
+.dpad .up { grid-area: 1 / 2; } .dpad .left { grid-area: 2 / 1; } .dpad .right { grid-area: 2 / 3; } .dpad .down { grid-area: 3 / 2; }
+label.inline { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-weight: 400; color: var(--ink); }
+.pending-photos { list-style: none; margin: 6px 0 0; padding: 0; display: flex; gap: 8px; flex-wrap: wrap; }
+.pending-photos li { position: relative; }
+.pending-photos img { width: 76px; height: 76px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); display: block; }
+.pending-photos .remove { position: absolute; top: -8px; right: -8px; min-height: 28px; min-width: 28px; padding: 0; border-radius: 50%; background: #fff; }
+/* phone: the sheet fills the screen while placing; step 1 leads, actions stay reachable at the bottom */
+.ws-sheet.full { top: env(safe-area-inset-top, 0px); bottom: 0; padding-bottom: env(safe-area-inset-bottom, 0px); max-height: none; border-radius: 0; z-index: 60; }
+.ws-sheet.full .sheet-body { flex: 1; }
+.placement-compact .position-row { justify-content: center; }
+.sheet-magnifier canvas { width: min(56vw, 220px); height: auto; aspect-ratio: 1; border: 2px solid #d6246e; border-radius: var(--radius); display: block; background: #fff; }
+.place-actions.sticky { position: sticky; bottom: 0; background: var(--panel); margin: 0 -10px; padding: 8px 10px; border-top: 1px solid var(--line); }
+.place-actions.sticky button { flex: 1; }

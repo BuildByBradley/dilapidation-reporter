@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { go } from '../../app/App';
 import { SaveIndicator } from '../../components/SaveIndicator';
+import { CloudStatus } from '../../components/Cloud';
 import { Confirm, Dialog, useToast } from '../../components/ui';
 import { db } from '../../data/db';
 import { flushAll } from '../../data/flush';
@@ -50,6 +51,8 @@ export function Workspace({ projectId }: { projectId: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(null);
   const [form, setForm] = useState<NewFindingForm>(emptyForm());
+  const [pendingPhotos, setPendingPhotos] = useState<repo.ProcessedImage[]>([]);
+  const [sheetMag, setSheetMag] = useState<HTMLCanvasElement | null>(null);
   const [importFor, setImportFor] = useState<string | null>(null);
   const [showCats, setShowCats] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
@@ -91,7 +94,7 @@ export function Workspace({ projectId }: { projectId: string }) {
   const counts = useMemo(() => findings.reduce<Record<string, number>>((m, f) => ({ ...m, [f.floorId]: (m[f.floorId] ?? 0) + 1 }), {}), [findings]);
   const selected = findings.find((f) => f.id === selectedId) ?? null;
   const placing = interaction.kind !== 'navigate';
-  const formDirty = interaction.kind === 'placePin' && !!(form.title || form.description || form.locationNotes);
+  const formDirty = interaction.kind === 'placePin' && !!(form.title || form.description || form.locationNotes || pendingPhotos.length);
   const currentFloorId = 'floorId' in viewer ? viewer.floorId : null;
 
   // clear the selection only when a finding we have seen disappears (a just-created one may not be in the live list yet)
@@ -107,7 +110,7 @@ export function Workspace({ projectId }: { projectId: string }) {
 
   useEffect(() => { if (selectedId || draft || interaction.kind !== 'navigate') { setSheetOpen(true); setDrawer(null); } }, [selectedId, draft, interaction.kind]);
 
-  const cancelPlacement = useCallback(() => { setInteraction({ kind: 'navigate' }); setDraft(null); setForm(emptyForm(lastCategory.current)); }, []);
+  const cancelPlacement = useCallback(() => { setInteraction({ kind: 'navigate' }); setDraft(null); setForm(emptyForm(lastCategory.current)); setPendingPhotos([]); }, []);
   const guardDiscard = (proceed: () => void) => { if (formDirty && draft) setDiscard(() => proceed); else proceed(); };
 
   const selectFloor = (id: string) => {
@@ -138,7 +141,7 @@ export function Workspace({ projectId }: { projectId: string }) {
   const togglePlace = () => {
     if (readOnly || viewer.kind === 'overview3d') return;
     if (placing) { guardDiscard(cancelPlacement); return; }
-    setSelectedId(null); setInteraction({ kind: 'placePin' }); setDraft(null); setForm(emptyForm(lastCategory.current)); setPanelOpen(true);
+    setSelectedId(null); setInteraction({ kind: 'placePin' }); setDraft(null); setForm(emptyForm(lastCategory.current)); setPendingPhotos([]); setPanelOpen(true);
   };
   const startRelocate = (id: string) => {
     const f = findings.find((x) => x.id === id);
@@ -165,10 +168,14 @@ export function Workspace({ projectId }: { projectId: string }) {
       } else {
         const f = await repo.createFinding({ floorId: draft.floorId, u: draft.u, v: draft.v, categoryId: form.categoryId, title: form.title, severity: form.severity, description: form.description, locationNotes: form.locationNotes });
         lastCategory.current = form.categoryId;
+        // The finding is saved first; photos follow. A failed photo leaves the finding in place and says which.
+        let failed = 0;
+        for (const img of pendingPhotos) { try { await repo.addPhoto(f.id, img); } catch { failed++; } }
         setSelectedId(f.id);
-        toast('ok', `${f.reference} saved — add photos below`);
+        if (failed) toast('error', `${f.reference} saved, but ${failed} photo${failed === 1 ? '' : 's'} could not be attached. Add ${failed === 1 ? 'it' : 'them'} again from the finding.`);
+        else toast('ok', pendingPhotos.length ? `${f.reference} saved with ${pendingPhotos.length} photo${pendingPhotos.length === 1 ? '' : 's'}` : `${f.reference} saved`);
       }
-      setInteraction({ kind: 'navigate' }); setDraft(null); setForm(emptyForm(lastCategory.current));
+      setInteraction({ kind: 'navigate' }); setDraft(null); setForm(emptyForm(lastCategory.current)); setPendingPhotos([]);
     } catch (e) {
       toast('error', `Not saved: ${e instanceof Error ? e.message : String(e)} Your entries are still here — try again.`);
     } finally { setSaving(false); }
@@ -191,7 +198,7 @@ export function Workspace({ projectId }: { projectId: string }) {
     <ViewerPane
       floors={floors} findings={findings} categories={categories} mode={viewer} interaction={interaction} selectedId={selectedId} draft={draft} readOnly={readOnly} compact={compact}
       onFloorPick={selectFloor} onSelect={selectFinding} onPlace={onPlace} onEscape={onEscape} onReturn={toOverview} onToggle2D={toggle2D} onTogglePlace={togglePlace}
-      onNotice={(t) => toast('info', t)}
+      onNotice={(t) => toast('info', t)} sheetMagnifier={compact ? sheetMag : null}
     />
   );
   const headerContent = (
@@ -199,6 +206,7 @@ export function Workspace({ projectId }: { projectId: string }) {
       <button className="link" onClick={leave} aria-label="Back to projects">← Projects</button>
       <h1 title={project.name}>{project.name}</h1>
       <SaveIndicator />
+      <CloudStatus />
       <span className="spacer" />
       <button onClick={() => { setDrawer(null); toggle2D(); }} aria-pressed={viewer.kind === 'floor2d'}>{viewer.kind === 'floor2d' ? '3D view' : '2D view'}</button>
       <button className="primary" onClick={openReport}>Report</button>
@@ -232,6 +240,7 @@ export function Workspace({ projectId }: { projectId: string }) {
         mode={interaction.kind === 'relocatePin' ? 'relocate' : 'new'} reference={relocFinding?.reference} floorName={placementFloor.name}
         u={draft.u} v={draft.v} assetWidth={draftAsset.width} assetHeight={draftAsset.height} categories={categories} form={form} setForm={setForm}
         onNudge={nudge} onConfirm={confirmPlacement} onCancel={() => guardDiscard(cancelPlacement)} busy={saving}
+        compact={compact} magnifierRef={setSheetMag} onShowPlan={() => setSheetOpen(false)} pendingPhotos={pendingPhotos} setPendingPhotos={setPendingPhotos}
       />
     ) : placing ? (
       <section className="editor"><h2>{interaction.kind === 'relocatePin' ? 'Relocate pin' : 'Add pin'}</h2><p>Tap the plan where the condition is. A target and magnifier will appear so you can fine-tune before saving.</p>
@@ -294,7 +303,7 @@ export function Workspace({ projectId }: { projectId: string }) {
         </aside>
 
         {editorNode && (
-          <section className={`ws-sheet${sheetOpen ? '' : ' collapsed'}`} aria-label="Finding details" data-testid="bottom-sheet">
+          <section className={`ws-sheet${sheetOpen ? '' : ' collapsed'}${draft && sheetOpen ? ' full' : ''}`} aria-label="Finding details" data-testid="bottom-sheet">
             <button className="sheet-head" aria-expanded={sheetOpen} onClick={() => setSheetOpen(!sheetOpen)}>
               <span className="grabber" aria-hidden="true" /><span className="sheet-title">{sheetTitle}</span><span aria-hidden="true">{sheetOpen ? '▾' : '▴'}</span>
             </button>

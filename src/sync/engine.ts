@@ -1,0 +1,289 @@
+import type { InspectorDb, SyncRow } from '../data/db';
+import type { Asset, Floor, Photo } from '../lib/types';
+
+/**
+ * Two-way sync between this browser's IndexedDB and the cloud.
+ *
+ * Local first: the app only ever reads and writes IndexedDB. The engine notices changes by comparing each row's
+ * content hash with the hash last exchanged with the server (the `sync` table), uploads what differs, and applies
+ * other devices' changes as they arrive. Files (plans, photos) go to file storage before the records that use them,
+ * and incoming records wait for the files they reference, so a viewer never sees a floor without its plan.
+ * Conflicts: an unsynced local edit wins over an incoming change to the same row; otherwise the latest write wins.
+ */
+
+/** Upload order: a record is always sent after the records it references. Deletions go in reverse. */
+export const KINDS = ['projects', 'categories', 'assets', 'floors', 'findings', 'photos'] as const;
+export type Kind = (typeof KINDS)[number];
+const RANK = new Map<string, number>(KINDS.map((k, i) => [k, i]));
+
+export type RecordRow = { kind: Kind; id: string; project_id: string; data: Record<string, unknown> | null; deleted: boolean; device: string | null };
+export type RemoteRecord = RecordRow & { updated_at: string };
+
+export interface Remote {
+  upsert(rows: RecordRow[]): Promise<void>;
+  /** Every record changed after `since` (exclusive), oldest first. `null` means everything. */
+  fetchSince(since: string | null): Promise<RemoteRecord[]>;
+  fetchOne(kind: Kind, id: string): Promise<RemoteRecord | null>;
+  uploadBlob(id: string, blob: Blob): Promise<void>;
+  downloadBlob(id: string): Promise<Blob | null>;
+  deleteBlobs(ids: string[]): Promise<void>;
+  /** Live feed of record changes. `onLive(true)` when connected (and again after each reconnect). */
+  subscribe(onRecord: (r: RemoteRecord) => void, onLive: (live: boolean) => void): () => void;
+}
+
+export type SyncStatus =
+  | { kind: 'syncing'; pending: number }
+  | { kind: 'synced'; at: string; live: boolean }
+  | { kind: 'offline'; pending: number }
+  | { kind: 'error'; pending: number; message: string };
+
+// ---------- hashing ----------
+/** JSON with sorted keys and undefined dropped, so a row hashes the same after a round trip through jsonb. */
+export function stableJson(v: unknown): string {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null';
+  if (Array.isArray(v)) return `[${v.map((x) => (x === undefined ? 'null' : stableJson(x))).join(',')}]`;
+  const o = v as Record<string, unknown>;
+  return `{${Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${stableJson(o[k])}`).join(',')}}`;
+}
+export function hashRow(v: unknown): string {
+  const s = stableJson(v);
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36) + ':' + s.length;
+}
+
+const key = (kind: string, id: string) => `${kind}:${id}`;
+const BLOB = 'blobs';
+const CURSOR = 'cursor';
+/** Re-read a little before the cursor: a transaction can commit after a later one started. Applying is idempotent. */
+const CURSOR_OVERLAP_MS = 2 * 60 * 1000;
+const assetBlobIds = (a: Asset) => [a.originalBlobId, a.displayBlobId, a.thumbnailBlobId, a.reportBlobId].filter((x): x is string => !!x);
+
+export class SyncEngine {
+  private queue: Promise<unknown> = Promise.resolve();
+  private pushTimer: ReturnType<typeof setTimeout> | undefined;
+  private running: Promise<void> | undefined;
+  private pushAgain = false;
+  private stopped = false;
+  private live = false;
+  private pending = 0;
+  private unsub: (() => void) | undefined;
+  private onChange = () => this.schedulePush();
+
+  constructor(
+    private db: InspectorDb,
+    private remote: Remote,
+    private device: string,
+    private report: (s: SyncStatus) => void = () => {},
+    private isOnline: () => boolean = () => true,
+    private pushDelayMs = 1200,
+  ) {}
+
+  /** Download what changed elsewhere, upload local changes, then follow live updates. */
+  async start(): Promise<void> {
+    this.db.changeListeners.add(this.onChange);
+    this.report({ kind: 'syncing', pending: 0 });
+    try { await this.pull(); } catch (e) { this.fail(e); }
+    await this.push();
+    if (this.stopped) return;
+    this.unsub = this.remote.subscribe(
+      (r) => { void this.enqueue(() => this.apply(r)); },
+      (live) => { this.live = live; if (live) void this.pull().catch((e) => this.fail(e)); this.reportIdle(); },
+    );
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.db.changeListeners.delete(this.onChange);
+    clearTimeout(this.pushTimer);
+    this.unsub?.();
+  }
+
+  schedulePush(delay = this.pushDelayMs): void {
+    if (this.stopped) return;
+    clearTimeout(this.pushTimer);
+    this.pushTimer = setTimeout(() => { void this.push(); }, delay);
+  }
+
+  /** Wait until queued incoming changes have been applied (tests, and before reporting "synced"). */
+  idle(): Promise<unknown> { return this.queue; }
+
+  // ---------- incoming ----------
+  async pull(): Promise<void> {
+    const cursor = (await this.db.meta.get(CURSOR))?.value ?? null;
+    const since = cursor ? new Date(Date.parse(cursor) - CURSOR_OVERLAP_MS).toISOString() : null;
+    const rows = await this.remote.fetchSince(since);
+    if (!rows.length) return;
+    // Parents before children; deletions after everything, children first.
+    const ordered = [...rows].sort((a, b) =>
+      Number(a.deleted) - Number(b.deleted)
+      || (a.deleted ? RANK.get(b.kind)! - RANK.get(a.kind)! : RANK.get(a.kind)! - RANK.get(b.kind)!)
+      || a.updated_at.localeCompare(b.updated_at));
+    await this.enqueue(async () => { for (const r of ordered) await this.apply(r); });
+    const latest = rows.reduce((m, r) => (r.updated_at > m ? r.updated_at : m), cursor ?? '');
+    await this.db.meta.put({ key: CURSOR, value: latest });
+  }
+
+  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(fn, fn);
+    this.queue = run.catch((e) => this.fail(e));
+    return run;
+  }
+
+  private async apply(r: RemoteRecord): Promise<void> {
+    if (r.device === this.device || !RANK.has(r.kind)) return; // our own echo
+    const table = this.db.table(r.kind);
+    const k = key(r.kind, r.id);
+    const [local, st] = await Promise.all([table.get(r.id), this.db.sync.get(k)]);
+    if (local && st && hashRow(local) !== st.hash) return; // unsynced local edit wins; it is uploaded next
+    if (!local && st && !r.deleted) return; // deleted here but not yet uploaded: the deletion wins
+    if (r.deleted) {
+      if (local) {
+        if (r.kind === 'assets') await this.dropLocalBlobs(local as Asset);
+        await table.delete(r.id);
+      }
+      await this.db.sync.delete(k);
+      return;
+    }
+    if (!r.data) return;
+    const h = hashRow(r.data);
+    if (!(local && hashRow(local) === h)) {
+      if (r.kind === 'assets') await this.fetchBlobs(r.data as Asset);
+      if (r.kind === 'floors' && (r.data as Floor).planAssetId) await this.ensureAsset((r.data as Floor).planAssetId!);
+      if (r.kind === 'photos') await this.ensureAsset((r.data as Photo).assetId);
+      await table.put(r.data);
+    }
+    await this.db.sync.put({ key: k, kind: r.kind, id: r.id, projectId: r.project_id, hash: h });
+  }
+
+  /** A floor or photo can arrive before its image record (e.g. live events racing a catch-up); fetch it first. */
+  private async ensureAsset(id: string) {
+    if (await this.db.assets.get(id)) return;
+    const r = await this.remote.fetchOne('assets', id);
+    if (r) await this.apply(r);
+  }
+
+  private async fetchBlobs(a: Asset) {
+    for (const id of assetBlobIds(a)) {
+      if (await this.db.blobs.get(id)) continue;
+      const data = await this.remote.downloadBlob(id);
+      if (!data) continue; // missing upstream: the viewer reports the plan/photo as missing
+      await this.db.blobs.put({ id, projectId: a.projectId, data });
+      await this.db.sync.put({ key: key(BLOB, id), kind: BLOB, id, projectId: a.projectId, hash: 'stored' });
+    }
+  }
+
+  private async dropLocalBlobs(a: Asset) {
+    const ids = assetBlobIds(a);
+    await this.db.blobs.bulkDelete(ids);
+    await this.db.sync.bulkDelete(ids.map((id) => key(BLOB, id)));
+  }
+
+  // ---------- outgoing ----------
+  /** Upload local changes. If an upload is already running, it runs once more and this resolves when it is done. */
+  push(): Promise<void> {
+    if (this.stopped) return Promise.resolve();
+    if (this.running) { this.pushAgain = true; return this.running; }
+    this.running = (async () => {
+      try {
+        do {
+          this.pushAgain = false;
+          await this.queue; // never upload a half-applied incoming change
+          await this.pushOnce();
+        } while (this.pushAgain && !this.stopped);
+      } catch (e) {
+        this.fail(e);
+        this.schedulePush(15000); // retry; also retried on reconnect
+        return;
+      } finally {
+        this.running = undefined;
+      }
+      this.reportIdle();
+    })();
+    return this.running;
+  }
+
+  private async pushOnce() {
+    const state = new Map<string, SyncRow>((await this.db.sync.toArray()).map((s) => [s.key, s]));
+    const seen = new Set<string>();
+
+    // Plan the work first so the status can say how much is waiting.
+    const blobIds = (await this.db.blobs.toCollection().primaryKeys()) as string[];
+    const newBlobs = blobIds.filter((id) => { seen.add(key(BLOB, id)); return !state.has(key(BLOB, id)); });
+    const changed: { kind: Kind; rows: { row: RecordRow; sync: SyncRow }[] }[] = [];
+    for (const kind of KINDS) {
+      const rows: { row: RecordRow; sync: SyncRow }[] = [];
+      for (const obj of (await this.db.table(kind).toArray()) as ({ id: string; projectId?: string } & Record<string, unknown>)[]) {
+        const k = key(kind, obj.id);
+        seen.add(k);
+        const h = hashRow(obj);
+        if (state.get(k)?.hash === h) continue;
+        const projectId = kind === 'projects' ? obj.id : String(obj.projectId ?? '');
+        rows.push({ row: { kind, id: obj.id, project_id: projectId, data: obj, deleted: false, device: this.device }, sync: { key: k, kind, id: obj.id, projectId, hash: h } });
+      }
+      changed.push({ kind, rows });
+    }
+    const gone = [...state.values()].filter((s) => !seen.has(s.key));
+    const goneRecords = gone.filter((s) => s.kind !== BLOB).sort((a, b) => RANK.get(b.kind)! - RANK.get(a.kind)!);
+    const goneBlobs = gone.filter((s) => s.kind === BLOB);
+    this.pending = newBlobs.length + changed.reduce((n, c) => n + c.rows.length, 0) + goneRecords.length + goneBlobs.length;
+    if (!this.pending) return;
+    if (!this.isOnline()) { this.report({ kind: 'offline', pending: this.pending }); return; }
+    this.report({ kind: 'syncing', pending: this.pending });
+
+    // 1. Files first, a few at a time.
+    const work = [...newBlobs];
+    await Promise.all(Array.from({ length: 3 }, async () => {
+      for (let id = work.shift(); id; id = work.shift()) {
+        const b = await this.db.blobs.get(id);
+        if (!b) continue;
+        await this.remote.uploadBlob(id, b.data);
+        await this.db.sync.put({ key: key(BLOB, id), kind: BLOB, id, projectId: b.projectId, hash: 'stored' });
+        this.tick();
+      }
+    }));
+    // 2. Records, parents before children.
+    for (const { rows } of changed) {
+      for (let i = 0; i < rows.length; i += 200) {
+        const chunk = rows.slice(i, i + 200);
+        await this.remote.upsert(chunk.map((c) => c.row));
+        await this.db.sync.bulkPut(chunk.map((c) => c.sync));
+        this.tick(chunk.length);
+      }
+    }
+    // 3. Deletions as tombstones, children first; then their files.
+    for (let i = 0; i < goneRecords.length; i += 200) {
+      const chunk = goneRecords.slice(i, i + 200);
+      await this.remote.upsert(chunk.map((s) => ({ kind: s.kind as Kind, id: s.id, project_id: s.projectId, data: null, deleted: true, device: this.device })));
+      await this.db.sync.bulkDelete(chunk.map((s) => s.key));
+      this.tick(chunk.length);
+    }
+    if (goneBlobs.length) {
+      await this.remote.deleteBlobs(goneBlobs.map((s) => s.id));
+      await this.db.sync.bulkDelete(goneBlobs.map((s) => s.key));
+    }
+    this.pending = 0;
+  }
+
+  private tick(n = 1) {
+    this.pending = Math.max(0, this.pending - n);
+    this.report({ kind: 'syncing', pending: this.pending });
+  }
+
+  private reportIdle() {
+    if (this.stopped || this.running) return;
+    if (this.pending && !this.isOnline()) this.report({ kind: 'offline', pending: this.pending });
+    else if (!this.pending) this.report({ kind: 'synced', at: new Date().toISOString(), live: this.live });
+  }
+
+  private fail(e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error('sync failed', e);
+    this.report(this.isOnline() ? { kind: 'error', pending: this.pending, message } : { kind: 'offline', pending: this.pending });
+  }
+}
