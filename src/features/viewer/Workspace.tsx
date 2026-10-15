@@ -49,14 +49,20 @@ export function Workspace({ projectId }: { projectId: string }) {
 
   const readOnly = lock === 'readonly';
   useEffect(() => {
+    // Retry briefly: React StrictMode (dev) mounts, unmounts and remounts, so the first claim may still be
+    // releasing when the second asks. A genuinely different tab keeps the lock and stays denied.
     let cancelled = false;
-    const attempt = async () => {
-      const h = await acquireProjectLock(projectId);
-      if (cancelled) { h?.release(); return; }
-      lockRef.current = h; setLock(h ? 'held' : 'readonly');
-    };
-    void attempt();
-    return () => { cancelled = true; lockRef.current?.release(); lockRef.current = null; };
+    let handle: LockHandle | null = null;
+    (async () => {
+      for (let i = 0; i < 5 && !cancelled; i++) {
+        const h = await acquireProjectLock(projectId);
+        if (cancelled) { h?.release(); return; }
+        if (h) { handle = h; lockRef.current = h; setLock('held'); return; }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      if (!cancelled) setLock('readonly');
+    })();
+    return () => { cancelled = true; handle?.release(); if (lockRef.current === handle) lockRef.current = null; };
   }, [projectId]);
   const retryLock = async () => {
     const h = await acquireProjectLock(projectId);

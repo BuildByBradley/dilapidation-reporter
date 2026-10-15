@@ -43,7 +43,8 @@ orientation mapping/parsing, PNG header size sniffing, gesture thresholds, keybo
 | `npm run typecheck` | no errors |
 | `npm run lint` | no errors, no warnings |
 | `npm run test -- --run` | 4 files, **48 tests passed** |
-| `PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:e2e` | **34 passed** (≈2 min) |
+| `PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:e2e` | **36 passed** (≈2 min) |
+| `... npm run test:e2e:dev` (same suite against `vite` dev server / StrictMode) | **36 passed** |
 | `npm run build` | succeeded (main chunk ≈470 kB, pdf chunk ≈334 kB + 1.4 MB worker) |
 
 `npx playwright install chromium` was not needed in this container (pre-installed Chromium used via `PLAYWRIGHT_CHROMIUM_PATH`).
@@ -67,3 +68,13 @@ Scale fixture: sample project + 250 extra findings and 500 photo records (refere
 ## Material limitations
 
 See README → *Known limitations*. Most important: **no physical-touch, Safari or real-camera verification**; use `docs/MANUAL-CHECKLIST.md`.
+
+## Post-handover fixes (found by the reviewer running `npm run dev` on Windows)
+
+Both bugs only occurred under React StrictMode, which the dev server enables and the production build does not — the original suite
+ran only against the production build. Fixed and now covered by `npm run test:e2e:dev` plus `tests/e2e/pdf.spec.ts`:
+
+1. Project opened **read-only** in dev (Import/Add pin disabled): the one-editor-per-project lock lost a race with itself on remount.
+2. Imported plans were **not drawn** in dev: the viewer's redraw scheduler stayed marked "frame pending" after a remount. The new PDF test
+   samples canvas pixels to prove something is actually drawn (large A1 vector sheet and a `/Rotate 90` A0 sheet).
+3. The camera dialog could leave a second camera stream running after a remount; stale requests now release their stream.

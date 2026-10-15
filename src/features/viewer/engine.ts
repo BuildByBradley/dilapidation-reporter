@@ -114,6 +114,8 @@ export class ViewerEngine {
   }
   detach() {
     cancelAnimationFrame(this.raf);
+    this.raf = 0; // otherwise invalidate() would think a frame is still pending after a StrictMode remount
+    this.lastFrame = 0;
     this.cleanup.forEach((f) => f()); this.cleanup = [];
     this.gestures.cancel();
     this.canvas = null; this.ctx = null;

@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:dev": "node scripts/e2e-dev.mjs"
   },
   "dependencies": {
     "dexie": "^4.4.6",

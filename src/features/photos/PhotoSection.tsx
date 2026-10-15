@@ -37,20 +37,24 @@ export function CameraDialog({ onAccept, onClose, onFallback }: { onAccept(blob:
   const [state, setState] = useState<CamState>({ phase: 'starting' });
   const [saving, setSaving] = useState(false);
   const reviewUrl = useObjectUrl(state.phase === 'review' ? state.blob : null);
+  const generation = useRef(0);
   const stop = () => { streamRef.current?.getTracks().forEach((t) => t.stop()); streamRef.current = null; };
 
   const start = async () => {
     stop();
+    const mine = ++generation.current;
     setState({ phase: 'starting' });
     if (!navigator.mediaDevices?.getUserMedia) { setState({ phase: 'error', message: cameraErrorMessage(null) }); return; }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 2560 } }, audio: false });
+      // A newer start/stop (retake, close, React StrictMode remount) superseded this request: release the camera now.
+      if (mine !== generation.current) { stream.getTracks().forEach((t) => t.stop()); return; }
       streamRef.current = stream;
       if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play().catch(() => {}); }
       setState({ phase: 'live' });
-    } catch (e) { setState({ phase: 'error', message: cameraErrorMessage(e) }); }
+    } catch (e) { if (mine === generation.current) setState({ phase: 'error', message: cameraErrorMessage(e) }); }
   };
-  useEffect(() => { void start(); return stop; }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void start(); return () => { generation.current++; stop(); }; }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const capture = async () => {
     const v = videoRef.current;

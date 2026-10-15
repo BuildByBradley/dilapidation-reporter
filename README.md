@@ -30,6 +30,7 @@ npm run lint
 npm run test -- --run             # unit + data tests (Vitest, fake-indexeddb)
 npx playwright install chromium   # once, for the browser tests
 npm run test:e2e                  # builds, starts `vite preview` on http://localhost:4173, runs Playwright
+npm run test:e2e:dev              # same suite against the dev server (React StrictMode on) — catches dev-only bugs
 npm run build
 npm run preview -- --host 0.0.0.0 # serves dist/ on http://localhost:4173/
 ```
