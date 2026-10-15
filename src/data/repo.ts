@@ -270,7 +270,7 @@ export async function relocateFinding(id: string, u: number, v: number): Promise
     if (!isValidUv(u, v)) throw new RepoError('Pin location is outside the floor plan');
     const f = await db.findings.get(id);
     if (!f) throw new RepoError('Finding not found');
-    await db.findings.update(id, { u, v, updatedAt: nowIso() });
+    await db.findings.update(id, { u, v, locationNeedsReview: false, updatedAt: nowIso() });
     await touch(f.projectId);
   });
 }

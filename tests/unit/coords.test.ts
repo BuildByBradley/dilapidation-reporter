@@ -95,3 +95,14 @@ describe('camera constraints', () => {
     }
   });
 });
+
+describe('fit with padding', () => {
+  it('keeps planes inside the free region below the toolbar and above the help bar', () => {
+    const planes: [number, number, number][] = [[100, 70, 0], [100, 70, 60]];
+    const cam = fitCamera({ yaw: 30, elevation: ELEVATION_DEG, zoom: 1, panX: 0, panY: 0 }, planes, 700, 700, 0.9, { top: 80, bottom: 40 });
+    for (const [pw, ph, y] of planes) {
+      const b = planeBounds(cam, pw, ph, y, 350, 350);
+      expect(b.minY).toBeGreaterThanOrEqual(80); expect(b.maxY).toBeLessThanOrEqual(660);
+    }
+  });
+});

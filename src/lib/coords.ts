@@ -94,7 +94,7 @@ export function planeBounds(cam: Camera, W: number, H: number, y: number, cx: nu
 }
 
 /** Camera that fits a set of planes (given as [W,H,y]) into the canvas with a margin, keeping yaw/elevation. */
-export function fitCamera(base: Camera, planes: [number, number, number][], cw: number, ch: number, margin = 0.9): Camera {
+export function fitCamera(base: Camera, planes: [number, number, number][], cw: number, ch: number, margin = 0.9, pad: { top: number; bottom: number } = { top: 0, bottom: 0 }): Camera {
   const unit: Camera = { ...base, zoom: 1, panX: 0, panY: 0 };
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const [W, H, y] of planes) {
@@ -103,8 +103,11 @@ export function fitCamera(base: Camera, planes: [number, number, number][], cw: 
     minY = Math.min(minY, b.minY); maxY = Math.max(maxY, b.maxY);
   }
   const w = Math.max(1e-6, maxX - minX), h = Math.max(1e-6, maxY - minY);
-  const zoom = Math.min((cw * margin) / w, (ch * margin) / h);
-  return { ...base, zoom, panX: -zoom * (minX + maxX) / 2, panY: -zoom * (minY + maxY) / 2 };
+  const avail = Math.max(50, ch - pad.top - pad.bottom);
+  const zoom = Math.min((cw * margin) / w, (avail * margin) / h);
+  // centre the content in the free region (between the toolbar and the help bar), relative to the canvas centre
+  const shiftY = pad.top + avail / 2 - ch / 2;
+  return { ...base, zoom, panX: -zoom * (minX + maxX) / 2, panY: shiftY - zoom * (minY + maxY) / 2 };
 }
 
 /** Camera operations. Note there is deliberately no way to change elevation. */

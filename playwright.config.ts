@@ -17,7 +17,8 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:4173',
     trace: 'retain-on-failure',
-    launchOptions: { executablePath, args: ['--use-gl=angle', '--use-angle=swiftshader'] },
+    launchOptions: { executablePath, args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] },
+    permissions: ['camera'],
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
