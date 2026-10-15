@@ -189,7 +189,7 @@ export function Workspace({ projectId }: { projectId: string }) {
         </div>
       )}
       {!locksSupported() && <div className="banner warn small">This browser cannot prevent the same project being edited in two tabs. Keep it open in one tab only.</div>}
-      {reviewCount > 0 && <div className="banner warn small" data-testid="review-banner">⚠ {reviewCount} finding{reviewCount === 1 ? '' : 's'} need a location review after a plan replacement. They are flagged in the list and in the report.</div>}
+      {reviewCount > 0 && <div className="banner warn small" data-testid="review-banner">⚠ {reviewCount} finding{reviewCount === 1 ? ' needs' : 's need'} a location review after a plan replacement. They are flagged in the list and in the report.</div>}
 
       <div className={`ws-body${panelOpen ? '' : ' panel-closed'}`}>
         <aside className="ws-left">
