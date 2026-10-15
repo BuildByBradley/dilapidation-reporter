@@ -153,12 +153,70 @@ fieldset.warn { border: 1px solid var(--warn-line); background: var(--warn); bor
 .report th, .report td { border: 1px solid #ccc; padding: 2pt 6pt; text-align: left; } .report td { text-align: right; width: 14mm; } .report tr.total th, .report tr.total td { font-weight: 700; background: #f2f2f2; }
 .plan-figure { margin: 0 0 10pt; break-inside: avoid; page-break-inside: avoid; } .plan-img { width: 100%; max-height: 190mm; object-fit: contain; border: 1px solid #aaa; display: block; }
 .not-imported { border: 1px dashed #888; padding: 10pt; color: #444; } .legend { columns: 2; font-size: 9.5pt; margin: 6pt 0; padding-left: 22pt; }
-.finding-block { border: 1px solid #bbb; border-radius: 3pt; padding: 6pt 8pt; margin: 0 0 8pt; break-inside: avoid-page; page-break-inside: avoid; }
-.finding-body { display: grid; grid-template-columns: 1fr 52mm; gap: 8pt; align-items: start; } .inset-img { width: 52mm; border: 1px solid #aaa; }
-.photo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6pt; margin-top: 6pt; } .report-photo { margin: 0; break-inside: avoid; page-break-inside: avoid; }
-.report-photo-img { width: 100%; max-height: 80mm; object-fit: contain; background: #f3f3f3; display: block; } .report-photo figcaption { font-size: 9pt; color: #333; overflow-wrap: anywhere; }
-.report-img-placeholder { background: #f3f3f3; color: #777; padding: 10pt; text-align: center; font-size: 9pt; } .warn-line { background: #fff4d6; padding: 2pt 6pt; font-weight: 600; font-size: 9.5pt; }
-.floor-findings > h3 { break-after: avoid; }
+.report-img-placeholder { background: #f3f3f3; color: #777; padding: 10pt; text-align: center; font-size: 9pt; }
+
+/* ---- report finding block (design: finding-block-print.html, Industry palette) ---- */
+.report {
+  --r-ink: #1d1f20; --r-ink-2: #424244; --r-ink-3: #5d5d60; --r-muted: #7a7a7d; --r-line: #d4d4d7; --r-line-soft: #e7e7ea;
+  --r-tint: #f5f5f8; --r-accent-700: #416180; --r-warn-bg: #fff6dc; --r-warn-line: #c9a227;
+  --r-head: "Barlow Condensed", "Arial Narrow", "Segoe UI", Helvetica, Arial, sans-serif;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+.report .findings-title { display: flex; justify-content: space-between; align-items: baseline; gap: 8pt; flex-wrap: wrap; font-family: var(--r-head); text-transform: uppercase; letter-spacing: .02em; }
+.report .findings-title small { font: 500 9pt system-ui, sans-serif; text-transform: none; letter-spacing: 0; color: var(--r-ink-3); }
+.report .floor-head { font: 600 11pt/1 var(--r-head); text-transform: uppercase; letter-spacing: .06em; color: var(--r-accent-700); margin: 5mm 0 3mm; padding-bottom: 1.5mm; border-bottom: 1px solid var(--r-line); break-after: avoid; page-break-after: avoid; }
+/* blueprint frame with corner ticks */
+.report .bp { position: relative; border: 1px solid var(--r-line); }
+.report .bp > i { position: absolute; width: 11px; height: 11px; color: #8a8a8d; }
+.report .bp > i::before, .report .bp > i::after { content: ""; position: absolute; background: currentColor; }
+.report .bp > i::before { left: 5px; top: 0; width: 1px; height: 100%; }
+.report .bp > i::after { top: 5px; left: 0; width: 100%; height: 1px; }
+.report .bp > i.tl { top: -6px; left: -6px; } .report .bp > i.tr { top: -6px; right: -6px; } .report .bp > i.bl { bottom: -6px; left: -6px; } .report .bp > i.br { bottom: -6px; right: -6px; }
+.report .finding-block { margin: 0 0 7mm; color: var(--r-ink); font-size: 10.5pt; line-height: 1.4; }
+.report .finding-block p { margin: 0; }
+.report .finding-lead { break-inside: avoid; page-break-inside: avoid; }
+.report .finding-cont { margin-top: -4mm; }
+.report .f-head, .report .f-cont { display: grid; grid-template-columns: auto 1fr auto; gap: 0 4mm; align-items: center; padding: 2.5mm 4mm; border-bottom: 1px solid var(--r-ink); background: var(--r-tint); break-after: avoid; page-break-after: avoid; }
+.report .f-ref { font: 700 15pt/1 var(--r-head); letter-spacing: .02em; }
+.report .f-title { font: 600 12pt/1.15 var(--r-head); text-wrap: pretty; overflow-wrap: anywhere; }
+.report .f-cont { align-items: baseline; padding: 1.8mm 4mm; }
+.report .f-cont .f-ref { font-size: 12pt; } .report .f-cont .f-title { font-size: 10.5pt; font-weight: 500; color: var(--r-ink-2); }
+.report .f-cont em { font: 500 8.5pt system-ui, sans-serif; color: var(--r-ink-3); text-transform: uppercase; letter-spacing: .08em; }
+.report .f-labels { display: flex; gap: 2mm; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.report .lbl { display: inline-flex; align-items: center; gap: 1.6mm; height: 6mm; padding: 0 2.4mm; border: 1px solid var(--r-line); font-size: 8.5pt; line-height: 1; white-space: nowrap; background: #fff; color: var(--r-ink-2); }
+.report .lbl b { font-weight: 600; color: var(--r-ink); }
+.report .lbl .k { color: var(--r-muted); font-size: 7.5pt; text-transform: uppercase; letter-spacing: .06em; }
+.report .sw { width: 3mm; height: 3mm; border: 1px solid rgba(0, 0, 0, .35); flex: none; }
+.report .sev svg { width: 3.2mm; height: 3.2mm; flex: none; display: block; }
+.report .sev.major { border-color: var(--r-ink); background: var(--r-ink); color: #fff; } .report .sev.major b { color: #fff; }
+.report .sev.moderate { border-color: var(--r-ink); }
+.report .f-warn { display: flex; gap: 2mm; align-items: center; padding: 1.5mm 4mm; background: var(--r-warn-bg); border-bottom: 1px solid var(--r-warn-line); font-size: 9pt; font-weight: 600; }
+.report .f-warn svg { width: 3.5mm; height: 3.5mm; flex: none; } .report .f-warn span { font-weight: 400; color: var(--r-ink-2); }
+.report .f-body { display: grid; grid-template-columns: 1fr 60mm; gap: 4mm 5mm; padding: 3.5mm 4mm 4mm; align-items: start; }
+.report .f-text { min-width: 0; } .report .f-text p + p { margin-top: 2mm; }
+.report .f-text .loc { font-size: 9.5pt; color: var(--r-ink-2); }
+.report .f-text .loc b { font-weight: 600; color: var(--r-ink); text-transform: uppercase; font-size: 7.5pt; letter-spacing: .06em; margin-right: 1.5mm; }
+.report .f-text .none { color: var(--r-muted); font-style: italic; }
+.report .plan-x { width: 60mm; margin: 0; }
+.report .plan-frame { position: relative; border: 1px solid var(--r-ink-2); background: #fff; }
+.report .plan-frame .inset-img, .report .plan-frame .report-img-placeholder { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+.report .floor-badge { position: absolute; left: 0; top: 0; min-width: 6mm; padding: .6mm 1.2mm; background: var(--r-ink); color: #fff; font: 700 7pt/1 var(--r-head); letter-spacing: .04em; text-align: center; }
+.report .plan-cap { display: flex; justify-content: space-between; gap: 2mm; margin-top: 1.2mm; font-size: 7.5pt; color: var(--r-ink-3); }
+.report .plan-cap b { font-weight: 600; color: var(--r-ink-2); }
+/* photos: 6-track grid, landscape spans 3 (2 per row), portrait spans 2 (3 per row), fixed image height */
+.report .f-photos { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4mm; padding: 0 4mm 4mm; }
+.report .finding-cont .f-photos { padding-top: 4mm; }
+.report .report-photo { margin: 0; min-width: 0; break-inside: avoid; page-break-inside: avoid; }
+.report .report-photo.l { grid-column: span 3; } .report .report-photo.p { grid-column: span 2; }
+.report .report-photo-img { display: block; height: 50mm; width: auto; max-width: 100%; object-fit: contain; border: 1px solid var(--r-line); }
+.report .report-photo .report-img-placeholder { height: 50mm; }
+.report .report-photo figcaption { margin-top: 1.4mm; font-size: 8.5pt; line-height: 1.3; color: var(--r-ink-2); overflow-wrap: anywhere; }
+.report .report-photo figcaption b { font-weight: 600; color: var(--r-ink); }
+@media (max-width: 700px) {
+  .report .f-head { grid-template-columns: auto 1fr; } .report .f-labels { grid-column: 1 / -1; justify-content: flex-start; margin-top: 2mm; }
+  .report .f-body { grid-template-columns: 1fr; } .report .plan-x { width: 100%; max-width: 80mm; }
+  .report .report-photo.l, .report .report-photo.p { grid-column: span 6; } .report .report-photo-img { height: auto; max-height: 60mm; }
+}
 @page { size: A4; margin: 12mm; }
 @media print {
   html, body, #root, .report-page { height: auto !important; overflow: visible !important; background: #fff !important; }
