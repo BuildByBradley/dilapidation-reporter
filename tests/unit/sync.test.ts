@@ -134,4 +134,25 @@ describe('phone → PC live sync', () => {
     expect(cloud.records.get(`projects:${p.id}`)?.data?.name).toBe('PC edit');
     phone.engine.stop(); pc2.stop();
   });
+
+  it('a record that arrives before its file is in the cloud gets the file on a later pull', async () => {
+    const phone = device('phone'), pc = device('pc');
+    const { asset } = await on(phone.db, async () => {
+      const p = await repo.createProject({ name: 'Race' });
+      const [floor] = await repo.listFloors(p.id);
+      const asset = await repo.setFloorPlan(floor.id, img(7));
+      return { asset };
+    });
+    await phone.engine.start(); await phone.engine.idle();
+    const held = cloud.files.get(asset.displayBlobId)!;
+    cloud.files.delete(asset.displayBlobId); // file not visible yet
+    await pc.engine.start(); await pc.engine.idle();
+    expect(await pc.db.assets.get(asset.id)).toBeTruthy();
+    expect(await pc.db.blobs.get(asset.displayBlobId)).toBeUndefined();
+    cloud.files.set(asset.displayBlobId, held);
+    await pc.engine.pull(); await pc.engine.idle();
+    expect(await pc.db.blobs.get(asset.displayBlobId)).toBeTruthy();
+    expect((await pc.db.meta.get('missingBlobs'))?.value).toBe('{}');
+    phone.engine.stop(); pc.engine.stop();
+  });
 });

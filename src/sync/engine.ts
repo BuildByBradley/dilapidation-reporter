@@ -60,6 +60,7 @@ export function hashRow(v: unknown): string {
 const key = (kind: string, id: string) => `${kind}:${id}`;
 const BLOB = 'blobs';
 const CURSOR = 'cursor';
+const MISSING = 'missingBlobs';
 /** Re-read a little before the cursor: a transaction can commit after a later one started. Applying is idempotent. */
 const CURSOR_OVERLAP_MS = 2 * 60 * 1000;
 const assetBlobIds = (a: Asset) => [a.originalBlobId, a.displayBlobId, a.thumbnailBlobId, a.reportBlobId].filter((x): x is string => !!x);
@@ -118,6 +119,7 @@ export class SyncEngine {
     const cursor = (await this.db.meta.get(CURSOR))?.value ?? null;
     const since = cursor ? new Date(Date.parse(cursor) - CURSOR_OVERLAP_MS).toISOString() : null;
     const rows = await this.remote.fetchSince(since);
+    await this.enqueue(() => this.retryMissing());
     if (!rows.length) return;
     // Parents before children; deletions after everything, children first.
     const ordered = [...rows].sort((a, b) =>
@@ -169,12 +171,32 @@ export class SyncEngine {
   }
 
   private async fetchBlobs(a: Asset) {
-    for (const id of assetBlobIds(a)) {
-      if (await this.db.blobs.get(id)) continue;
-      const data = await this.remote.downloadBlob(id);
-      if (!data) continue; // missing upstream: the viewer reports the plan/photo as missing
-      await this.db.blobs.put({ id, projectId: a.projectId, data });
-      await this.db.sync.put({ key: key(BLOB, id), kind: BLOB, id, projectId: a.projectId, hash: 'stored' });
+    for (const id of assetBlobIds(a)) await this.fetchBlob(id, a.projectId);
+  }
+
+  /** Download one file. If it is not in the cloud yet, remember it and try again on later pulls. */
+  private async fetchBlob(id: string, projectId: string): Promise<void> {
+    if (await this.db.blobs.get(id)) { await this.setMissing(id, null); return; }
+    const data = await this.remote.downloadBlob(id);
+    if (!data) { await this.setMissing(id, projectId); return; }
+    await this.db.blobs.put({ id, projectId, data });
+    await this.db.sync.put({ key: key(BLOB, id), kind: BLOB, id, projectId, hash: 'stored' });
+    await this.setMissing(id, null);
+  }
+
+  private async missing(): Promise<Record<string, string>> {
+    return JSON.parse((await this.db.meta.get(MISSING))?.value ?? '{}');
+  }
+  private async setMissing(id: string, projectId: string | null) {
+    const m = await this.missing();
+    if (projectId) m[id] = projectId; else if (id in m) delete m[id]; else return;
+    await this.db.meta.put({ key: MISSING, value: JSON.stringify(m) });
+  }
+  private async retryMissing() {
+    const m = await this.missing();
+    for (const [id, projectId] of Object.entries(m)) {
+      if (!(await this.db.blobs.where('projectId').equals(projectId).count()) && !(await this.db.projects.get(projectId))) { await this.setMissing(id, null); continue; }
+      await this.fetchBlob(id, projectId);
     }
   }
 
@@ -182,6 +204,7 @@ export class SyncEngine {
     const ids = assetBlobIds(a);
     await this.db.blobs.bulkDelete(ids);
     await this.db.sync.bulkDelete(ids.map((id) => key(BLOB, id)));
+    for (const id of ids) await this.setMissing(id, null);
   }
 
   // ---------- outgoing ----------
@@ -209,16 +232,21 @@ export class SyncEngine {
   }
 
   private async pushOnce() {
-    const state = new Map<string, SyncRow>((await this.db.sync.toArray()).map((s) => [s.key, s]));
+    // One consistent snapshot: a record must never be uploaded without the files written in the same transaction.
+    const snap = await this.db.transaction('r', [this.db.sync, this.db.blobs, ...KINDS.map((k) => this.db.table(k))], async () => ({
+      sync: await this.db.sync.toArray(),
+      blobIds: (await this.db.blobs.toCollection().primaryKeys()) as string[],
+      rows: await Promise.all(KINDS.map((k) => this.db.table(k).toArray())),
+    }));
+    const state = new Map<string, SyncRow>(snap.sync.map((s) => [s.key, s]));
     const seen = new Set<string>();
 
     // Plan the work first so the status can say how much is waiting.
-    const blobIds = (await this.db.blobs.toCollection().primaryKeys()) as string[];
-    const newBlobs = blobIds.filter((id) => { seen.add(key(BLOB, id)); return !state.has(key(BLOB, id)); });
+    const newBlobs = snap.blobIds.filter((id) => { seen.add(key(BLOB, id)); return !state.has(key(BLOB, id)); });
     const changed: { kind: Kind; rows: { row: RecordRow; sync: SyncRow }[] }[] = [];
-    for (const kind of KINDS) {
+    for (const [ki, kind] of KINDS.entries()) {
       const rows: { row: RecordRow; sync: SyncRow }[] = [];
-      for (const obj of (await this.db.table(kind).toArray()) as ({ id: string; projectId?: string } & Record<string, unknown>)[]) {
+      for (const obj of snap.rows[ki] as ({ id: string; projectId?: string } & Record<string, unknown>)[]) {
         const k = key(kind, obj.id);
         seen.add(k);
         const h = hashRow(obj);
