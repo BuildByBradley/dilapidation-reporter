@@ -18,9 +18,12 @@ export function newCanvas(w: number, h: number): HTMLCanvasElement {
 export const canvasToBlob = (c: HTMLCanvasElement, type: string, q?: number) =>
   new Promise<Blob>((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new ImportError('Could not encode image (out of memory?)'))), type, q));
 
-/** Draw any source scaled so its long edge <= maxEdge (never upscales), flattening onto white if asked. */
+/**
+ * Draw any source scaled so its long edge <= maxEdge and its area stays within what mobile browsers allow for a
+ * canvas (never upscales), flattening onto white if asked.
+ */
 export function scaled(src: CanvasImageSource, sw: number, sh: number, maxEdge: number, flatten: boolean): HTMLCanvasElement {
-  const k = Math.min(1, maxEdge / Math.max(sw, sh));
+  const k = Math.min(1, maxEdge / Math.max(sw, sh), Math.sqrt(LIMITS.maxCanvasPixels / (sw * sh)));
   const c = newCanvas(sw * k, sh * k);
   const ctx = c.getContext('2d');
   if (!ctx) throw new ImportError('Canvas is unavailable in this browser.');
@@ -89,13 +92,16 @@ export async function processPhoto(file: Blob, filename: string, o: Opts = {}): 
   const bmp = await decodeBitmap(file);
   try {
     o.onProgress?.(0.4, 'Processing');
-    // re-encoding through a canvas drops EXIF/GPS from the derivatives
-    const disp = scaled(bmp, bmp.width, bmp.height, LIMITS.photoReportEdge, true);
-    const display = await canvasToBlob(disp, 'image/jpeg', 0.85);
+    // One compact image is stored (it is the original, the viewing copy and the report copy): 1920 px, JPEG 0.75.
+    // Re-encoding through a canvas also drops EXIF/GPS. Photos already that small and light are kept as they are.
+    const disp = scaled(bmp, bmp.width, bmp.height, LIMITS.photoStoreEdge, true);
+    const reencoded = await canvasToBlob(disp, 'image/jpeg', LIMITS.photoStoreQuality);
+    const small = mime === 'image/jpeg' && bmp.width === disp.width && bmp.height === disp.height && file.size <= reencoded.size && orientation === 1;
+    const stored = small ? file : reencoded;
     check(o.signal);
-    const thumbnail = await canvasToBlob(scaled(disp, disp.width, disp.height, LIMITS.thumbEdge, true), 'image/jpeg', 0.8);
+    const thumbnail = await canvasToBlob(scaled(disp, disp.width, disp.height, LIMITS.thumbEdge, true), 'image/jpeg', 0.75);
     o.onProgress?.(1, 'Done');
-    return { filename, mime, width: disp.width, height: disp.height, original: file, display, thumbnail, orientation };
+    return { filename, mime: 'image/jpeg', width: disp.width, height: disp.height, original: stored, display: stored, thumbnail, orientation: 1 };
   } finally { bmp.close(); }
 }
 

@@ -155,4 +155,40 @@ describe('phone → PC live sync', () => {
     expect((await pc.db.meta.get('missingBlobs'))?.value).toBe('{}');
     phone.engine.stop(); pc.engine.stop();
   });
+
+  it('manual mode uses no network until Sync now, and reports how much is waiting', async () => {
+    const statuses: { kind: string; pending?: number }[] = [];
+    const db = new InspectorDb(`sync-manual-${++n}`);
+    let calls = 0;
+    const base = cloud.remote();
+    const counting: Remote = Object.fromEntries(Object.entries(base).map(([k, f]) => [k, (...a: unknown[]) => { calls++; return (f as (...x: unknown[]) => unknown)(...a); }])) as unknown as Remote;
+    const phone = new SyncEngine(db, counting, 'phone-manual', (st) => statuses.push(st as { kind: string; pending?: number }), () => true, 0, false);
+    await phone.start();
+    await on(db, () => repo.createProject({ name: 'Quiet' }));
+    expect(await phone.count()).toBe(1 + 5 + 8); // project, 5 floors, 8 starter categories
+    expect(calls).toBe(0);
+    expect(cloud.records.size).toBe(0);
+    expect(statuses.at(-1)).toMatchObject({ kind: 'manual', pending: 14 });
+    await phone.syncNow();
+    expect(cloud.records.size).toBe(14);
+    expect(statuses.at(-1)).toMatchObject({ kind: 'manual', pending: 0 });
+    // switching to automatic starts following live
+    await phone.setAuto(true);
+    expect(statuses.at(-1)?.kind).toBe('synced');
+    phone.stop();
+  });
+
+  it('a floor added on one device appears on the other', async () => {
+    const phone = device('phone'), pc = device('pc');
+    const p = await on(phone.db, () => repo.createProject({ name: 'Tall' }));
+    await phone.engine.start(); await pc.engine.start();
+    const f = await on(phone.db, () => repo.addFloor(p.id));
+    expect(f.name).toBe('Level 5');
+    await settle(phone.engine, pc.engine);
+    expect((await pc.db.floors.where('projectId').equals(p.id).sortBy('order')).map((x) => x.name).at(-1)).toBe('Level 5');
+    await on(pc.db, () => repo.deleteFloor(f.id));
+    await settle(pc.engine, phone.engine);
+    expect(await phone.db.floors.get(f.id)).toBeUndefined();
+    phone.engine.stop(); pc.engine.stop();
+  });
 });

@@ -39,13 +39,13 @@ export function drawPlanWithPins(img: ImageBitmap, pins: SnapPin[], maxEdge: num
   return c;
 }
 
-export async function planSnapshotBlob(img: ImageBitmap, pins: SnapPin[], maxEdge = 1800) {
-  return canvasToBlob(drawPlanWithPins(img, pins, maxEdge), 'image/jpeg', 0.88);
+export async function planSnapshotBlob(img: ImageBitmap, pins: SnapPin[], maxEdge = 3000) {
+  return canvasToBlob(drawPlanWithPins(img, pins, maxEdge), 'image/jpeg', 0.9);
 }
 
 /** Local inset: a crop of the plan around one pin, so dense areas stay legible. */
 /** Local plan detail around a pin (4:3), with the pin ring and, optionally, a reference tag under it. */
-export async function insetBlob(img: ImageBitmap, u: number, v: number, colour: string, label?: string, outW = 480, outH = 360): Promise<Blob> {
+export async function insetBlob(img: ImageBitmap, u: number, v: number, colour: string, label?: string, outW = 720, outH = 540): Promise<Blob> {
   const cropW = Math.min(img.width, img.width * 0.22), cropH = cropW * (outH / outW);
   const cx = Math.min(img.width - cropW / 2, Math.max(cropW / 2, u * img.width));
   const cy = Math.min(img.height - cropH / 2, Math.max(cropH / 2, v * img.height));
@@ -55,16 +55,16 @@ export async function insetBlob(img: ImageBitmap, u: number, v: number, colour: 
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img, cx - cropW / 2, cy - cropH / 2, cropW, cropH, 0, 0, outW, outH);
   const px = (u * img.width - (cx - cropW / 2)) * (outW / cropW), py = (v * img.height - (cy - cropH / 2)) * (outH / cropH);
-  ctx.lineWidth = 3; ctx.strokeStyle = '#fff'; ctx.beginPath(); ctx.arc(px, py, 9, 0, 7); ctx.stroke();
-  ctx.lineWidth = 2; ctx.strokeStyle = colour; ctx.beginPath(); ctx.arc(px, py, 9, 0, 7); ctx.stroke();
-  ctx.fillStyle = colour; ctx.beginPath(); ctx.arc(px, py, 2.5, 0, 7); ctx.fill();
+  ctx.lineWidth = 5; ctx.strokeStyle = '#fff'; ctx.beginPath(); ctx.arc(px, py, 14, 0, 7); ctx.stroke();
+  ctx.lineWidth = 3; ctx.strokeStyle = colour; ctx.beginPath(); ctx.arc(px, py, 14, 0, 7); ctx.stroke();
+  ctx.fillStyle = colour; ctx.beginPath(); ctx.arc(px, py, 4, 0, 7); ctx.fill();
   if (label) {
-    ctx.font = 'bold 24px "Barlow Condensed", "Arial Narrow", Arial, sans-serif';
-    const w = ctx.measureText(label).width + 14, h = 30;
-    const below = py + 14 + h <= outH;
-    const tx = Math.min(outW - w - 2, Math.max(2, px - w / 2)), ty = below ? py + 14 : py - 14 - h;
+    ctx.font = 'bold 34px "Barlow Condensed", "Arial Narrow", Arial, sans-serif';
+    const w = ctx.measureText(label).width + 20, h = 44;
+    const below = py + 21 + h <= outH;
+    const tx = Math.min(outW - w - 2, Math.max(2, px - w / 2)), ty = below ? py + 21 : py - 21 - h;
     ctx.fillStyle = '#1d1f20'; ctx.fillRect(tx, ty, w, h);
-    ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle'; ctx.fillText(label, tx + 7, ty + h / 2 + 1);
+    ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle'; ctx.fillText(label, tx + 10, ty + h / 2 + 1);
   }
   return canvasToBlob(c, 'image/jpeg', 0.88);
 }

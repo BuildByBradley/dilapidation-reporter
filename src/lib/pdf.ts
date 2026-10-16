@@ -36,8 +36,8 @@ export async function loadPdf(file: Blob, name: string): Promise<LoadedPdf> {
       if (page < 1 || page > doc.numPages) throw new ImportError(`Page ${page} does not exist.`);
       const p = await doc.getPage(page);
       const v1 = p.getViewport({ scale: 1 });
-      const scale = maxEdge / Math.max(v1.width, v1.height);
-      if ((v1.width * scale * v1.height * scale) / 1e6 > LIMITS.maxPlanMegapixels * 1.2) throw new ImportError('This PDF page is too large to rasterise safely.');
+      // As large as asked, but within the canvas area mobile browsers allow (vector line work stays crisp).
+      const scale = Math.min(maxEdge / Math.max(v1.width, v1.height), Math.sqrt(LIMITS.maxCanvasPixels / (v1.width * v1.height)));
       const vp = p.getViewport({ scale });
       const canvas = newCanvas(vp.width, vp.height);
       const ctx = canvas.getContext('2d');

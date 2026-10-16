@@ -35,7 +35,9 @@ export type SyncStatus =
   | { kind: 'syncing'; pending: number }
   | { kind: 'synced'; at: string; live: boolean }
   | { kind: 'offline'; pending: number }
-  | { kind: 'error'; pending: number; message: string };
+  | { kind: 'error'; pending: number; message: string }
+  /** Manual mode: nothing is sent or received until the user syncs. */
+  | { kind: 'manual'; pending: number; at?: string };
 
 // ---------- hashing ----------
 /** JSON with sorted keys and undefined dropped, so a row hashes the same after a round trip through jsonb. */
@@ -61,6 +63,7 @@ const key = (kind: string, id: string) => `${kind}:${id}`;
 const BLOB = 'blobs';
 const CURSOR = 'cursor';
 const MISSING = 'missingBlobs';
+const LAST_SYNC = 'lastSync';
 /** Re-read a little before the cursor: a transaction can commit after a later one started. Applying is idempotent. */
 const CURSOR_OVERLAP_MS = 2 * 60 * 1000;
 const assetBlobIds = (a: Asset) => [a.originalBlobId, a.displayBlobId, a.thumbnailBlobId, a.reportBlobId].filter((x): x is string => !!x);
@@ -74,7 +77,9 @@ export class SyncEngine {
   private live = false;
   private pending = 0;
   private unsub: (() => void) | undefined;
-  private onChange = () => this.schedulePush();
+  private countTimer: ReturnType<typeof setTimeout> | undefined;
+  private lastSync: string | undefined;
+  private onChange = () => (this.auto ? this.schedulePush() : this.scheduleCount());
 
   constructor(
     private db: InspectorDb,
@@ -83,30 +88,69 @@ export class SyncEngine {
     private report: (s: SyncStatus) => void = () => {},
     private isOnline: () => boolean = () => true,
     private pushDelayMs = 1200,
+    /** Automatic: live, continuous. Manual: only counts local changes; sends/receives on syncNow(). */
+    private auto = true,
   ) {}
 
-  /** Download what changed elsewhere, upload local changes, then follow live updates. */
+  /** Automatic mode: download what changed elsewhere, upload local changes, then follow live updates. */
   async start(): Promise<void> {
     this.db.changeListeners.add(this.onChange);
+    this.lastSync = (await this.db.meta.get(LAST_SYNC))?.value;
+    if (!this.auto) { await this.count(); return; }
     this.report({ kind: 'syncing', pending: 0 });
     try { await this.pull(); } catch (e) { this.fail(e); }
     await this.push();
     if (this.stopped) return;
+    this.followLive();
+  }
+
+  private followLive() {
+    if (this.unsub || this.stopped) return;
     this.unsub = this.remote.subscribe(
       (r) => { void this.enqueue(() => this.apply(r)); },
       (live) => { this.live = live; if (live) void this.pull().catch((e) => this.fail(e)); this.reportIdle(); },
     );
   }
 
+  /** Switch between automatic (live) and manual (sync on demand) without restarting. */
+  async setAuto(auto: boolean): Promise<void> {
+    if (auto === this.auto || this.stopped) return;
+    this.auto = auto;
+    if (auto) { await this.syncNow(); this.followLive(); return; }
+    this.unsub?.(); this.unsub = undefined; this.live = false;
+    clearTimeout(this.pushTimer);
+    await this.count();
+  }
+
+  /** Send local changes and fetch other devices' changes now (the manual "Sync" button; also works in automatic mode). */
+  async syncNow(): Promise<void> {
+    if (this.stopped) return;
+    this.report({ kind: 'syncing', pending: this.pending });
+    try { await this.pull(); } catch (e) { this.fail(e); return; }
+    await this.push();
+  }
+
   stop(): void {
     this.stopped = true;
     this.db.changeListeners.delete(this.onChange);
-    clearTimeout(this.pushTimer);
+    clearTimeout(this.pushTimer); clearTimeout(this.countTimer);
     this.unsub?.();
   }
 
+  /** Manual mode: recount what is waiting (local only, no network). */
+  private scheduleCount() {
+    clearTimeout(this.countTimer);
+    this.countTimer = setTimeout(() => { void this.count(); }, 400);
+  }
+  async count(): Promise<number> {
+    if (this.running) return this.pending;
+    await this.pushOnce(false);
+    this.reportIdle();
+    return this.pending;
+  }
+
   schedulePush(delay = this.pushDelayMs): void {
-    if (this.stopped) return;
+    if (this.stopped || !this.auto) return;
     clearTimeout(this.pushTimer);
     this.pushTimer = setTimeout(() => { void this.push(); }, delay);
   }
@@ -221,17 +265,22 @@ export class SyncEngine {
         } while (this.pushAgain && !this.stopped);
       } catch (e) {
         this.fail(e);
-        this.schedulePush(15000); // retry; also retried on reconnect
+        this.schedulePush(15000); // automatic mode retries; also retried on reconnect
         return;
       } finally {
         this.running = undefined;
+      }
+      if (!this.pending) {
+        this.lastSync = new Date().toISOString();
+        await this.db.meta.put({ key: LAST_SYNC, value: this.lastSync });
       }
       this.reportIdle();
     })();
     return this.running;
   }
 
-  private async pushOnce() {
+  /** Work out what differs from the server; with `upload`, send it. */
+  private async pushOnce(upload = true) {
     // One consistent snapshot: a record must never be uploaded without the files written in the same transaction.
     const snap = await this.db.transaction('r', [this.db.sync, this.db.blobs, ...KINDS.map((k) => this.db.table(k))], async () => ({
       sync: await this.db.sync.toArray(),
@@ -260,7 +309,7 @@ export class SyncEngine {
     const goneRecords = gone.filter((s) => s.kind !== BLOB).sort((a, b) => RANK.get(b.kind)! - RANK.get(a.kind)!);
     const goneBlobs = gone.filter((s) => s.kind === BLOB);
     this.pending = newBlobs.length + changed.reduce((n, c) => n + c.rows.length, 0) + goneRecords.length + goneBlobs.length;
-    if (!this.pending) return;
+    if (!this.pending || !upload) return;
     if (!this.isOnline()) { this.report({ kind: 'offline', pending: this.pending }); return; }
     this.report({ kind: 'syncing', pending: this.pending });
 
@@ -305,8 +354,9 @@ export class SyncEngine {
 
   private reportIdle() {
     if (this.stopped || this.running) return;
-    if (this.pending && !this.isOnline()) this.report({ kind: 'offline', pending: this.pending });
-    else if (!this.pending) this.report({ kind: 'synced', at: new Date().toISOString(), live: this.live });
+    if (!this.auto) this.report({ kind: 'manual', pending: this.pending, at: this.lastSync });
+    else if (this.pending && !this.isOnline()) this.report({ kind: 'offline', pending: this.pending });
+    else if (!this.pending) this.report({ kind: 'synced', at: this.lastSync ?? new Date().toISOString(), live: this.live });
   }
 
   private fail(e: unknown) {

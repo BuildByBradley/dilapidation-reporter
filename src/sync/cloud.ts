@@ -18,6 +18,32 @@ const set = (s: CloudState) => { state = s; listeners.forEach((l) => l()); };
 export const getCloudState = () => state;
 export const useCloudState = () => useSyncExternalStore((l) => { listeners.add(l); return () => { listeners.delete(l); }; }, getCloudState);
 
+/** True after the user opened a password-reset email link: the app asks for a new password. */
+let recovering = false;
+const recoveryListeners = new Set<() => void>();
+const setRecovering = (v: boolean) => { recovering = v; recoveryListeners.forEach((l) => l()); };
+export const useRecovering = () => useSyncExternalStore((l) => { recoveryListeners.add(l); return () => { recoveryListeners.delete(l); }; }, () => recovering);
+
+/** Where reset links return to: this page, without any route. */
+const appUrl = () => location.origin + location.pathname;
+
+/**
+ * Per-device sync mode. Manual saves mobile data: nothing is sent or received until "Sync now".
+ * Default: manual on phones, automatic (live) elsewhere.
+ */
+export type SyncMode = 'auto' | 'manual';
+const MODE_KEY = 'di-sync-mode';
+const defaultMode = (): SyncMode => (typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse) and (max-width: 900px)').matches ? 'manual' : 'auto');
+let mode: SyncMode = (() => { try { const v = localStorage.getItem(MODE_KEY); return v === 'auto' || v === 'manual' ? v : defaultMode(); } catch { return defaultMode(); } })();
+const modeListeners = new Set<() => void>();
+export const useSyncMode = () => useSyncExternalStore((l) => { modeListeners.add(l); return () => { modeListeners.delete(l); }; }, () => mode);
+export function setSyncMode(next: SyncMode) {
+  mode = next;
+  try { localStorage.setItem(MODE_KEY, next); } catch { /* per-session only */ }
+  modeListeners.forEach((l) => l());
+  void engine?.setAuto(next === 'auto');
+}
+
 let client: SupabaseClient | undefined;
 let engine: SyncEngine | undefined;
 let engineUser: string | undefined;
@@ -37,16 +63,20 @@ function startEngine(session: Session | null) {
   engine?.stop(); engine = undefined; engineUser = uid;
   if (!session || !client) { set({ kind: 'signedOut' }); return; }
   const email = session.user.email ?? 'signed in';
-  engine = new SyncEngine(db, supabaseRemote(client, session.user.id), deviceId(), (s) => set({ ...s, email }), () => navigator.onLine);
+  engine = new SyncEngine(db, supabaseRemote(client, session.user.id), deviceId(), (s) => set({ ...s, email }), () => navigator.onLine, 1200, mode === 'auto');
   void engine.start();
 }
 
 /** Called once at startup. Resumes the saved sign-in and starts syncing. */
 export function initCloud(): void {
   if (!cloudConfigured || client) return;
-  client = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
-  client.auth.onAuthStateChange((_event, session) => { setTimeout(() => startEngine(session), 0); });
-  const kick = () => { if (engine) { void engine.pull().catch(() => {}); engine.schedulePush(0); } };
+  // Implicit flow: a reset link opened on a different device from the one that asked for it still works.
+  client = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'implicit' } });
+  client.auth.onAuthStateChange((event, session) => {
+    if (event === 'PASSWORD_RECOVERY') setRecovering(true);
+    setTimeout(() => startEngine(session), 0);
+  });
+  const kick = () => { if (engine && mode === 'auto') { void engine.pull().catch(() => {}); engine.schedulePush(0); } };
   window.addEventListener('online', kick);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') kick(); });
   setInterval(kick, 60_000); // safety net if a live event is missed
@@ -61,7 +91,7 @@ export async function signIn(email: string, password: string): Promise<void> {
 /** Returns true when the account still needs its email confirmed before signing in. */
 export async function signUp(email: string, password: string): Promise<boolean> {
   if (!client) throw new Error('Cloud sync is not available in this build.');
-  const { data, error } = await client.auth.signUp({ email: email.trim(), password, options: { emailRedirectTo: location.origin + location.pathname } });
+  const { data, error } = await client.auth.signUp({ email: email.trim(), password, options: { emailRedirectTo: appUrl() } });
   if (error) throw new Error(error.message);
   return !data.session;
 }
@@ -74,4 +104,22 @@ export async function signOut(): Promise<void> {
   set({ kind: 'signedOut' });
 }
 
-export function syncNow(): void { engine?.schedulePush(0); void engine?.pull().catch(() => {}); }
+export function syncNow(): void { void engine?.syncNow(); }
+
+/** Email a password-reset link. The link opens the app, which then asks for a new password. */
+export async function sendPasswordReset(email: string): Promise<void> {
+  if (!client) throw new Error('Cloud sync is not available in this build.');
+  if (!email.trim()) throw new Error('Enter your email address first.');
+  const { error } = await client.auth.resetPasswordForEmail(email.trim(), { redirectTo: appUrl() });
+  if (error) throw new Error(/rate limit|too many/i.test(error.message) ? 'Too many emails requested. Wait a few minutes and try again.' : error.message);
+}
+
+/** Set a new password for the signed-in user (after a reset link, or from the account panel). */
+export async function updatePassword(password: string): Promise<void> {
+  if (!client) throw new Error('Cloud sync is not available in this build.');
+  if (password.length < 6) throw new Error('Use at least 6 characters.');
+  const { error } = await client.auth.updateUser({ password });
+  if (error) throw new Error(/same/i.test(error.message) ? 'Choose a password different from the old one.' : error.message);
+  setRecovering(false);
+}
+export const cancelRecovery = () => setRecovering(false);

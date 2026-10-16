@@ -9,7 +9,7 @@ import { loadSampleProject } from './sample';
 import { SaveIndicator } from '../../components/SaveIndicator';
 import { CloudPanel, CloudStatus } from '../../components/Cloud';
 
-type Details = Required<repo.ProjectInput>;
+type Details = Required<Omit<repo.ProjectInput, 'summary'>>;
 const empty = (): Details => ({ name: '', siteName: '', address: '', client: '', inspector: '', inspectionDate: new Date().toISOString().slice(0, 10), reference: '', notes: '' });
 
 function DetailsDialog({ initial, title, onSave, onClose }: { initial: Details; title: string; onSave: (d: Details) => Promise<void>; onClose: () => void }) {

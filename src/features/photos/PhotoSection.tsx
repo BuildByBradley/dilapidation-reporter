@@ -7,6 +7,7 @@ import { useStoredBlob } from '../../data/useBlob';
 import { processPhoto, ImportError } from '../../lib/imaging';
 import { useLive } from '../../lib/useLive';
 import type { Photo } from '../../lib/types';
+import { PhotoMarkup } from './PhotoMarkup';
 
 export function Lightbox({ photo, onClose }: { photo: Photo; onClose: () => void }) {
   const [asset] = useLive(() => db.assets.get(photo.assetId), [photo.assetId], undefined);
@@ -20,7 +21,7 @@ export function Lightbox({ photo, onClose }: { photo: Photo; onClose: () => void
   );
 }
 
-type CamState = { phase: 'starting' } | { phase: 'live' } | { phase: 'review'; blob: Blob } | { phase: 'error'; message: string };
+type CamState = { phase: 'starting' } | { phase: 'live' } | { phase: 'review'; blob: Blob; marked?: boolean } | { phase: 'markup'; blob: Blob } | { phase: 'error'; message: string };
 
 function cameraErrorMessage(e: unknown): string {
   const name = (e as { name?: string })?.name;
@@ -67,11 +68,11 @@ export function CameraDialog({ onAccept, onClose, onFallback }: { onAccept(blob:
   };
 
   return (
-    <Dialog title="Take photo" wide onClose={() => { stop(); onClose(); }}
-      footer={<>
+    <Dialog title={state.phase === 'markup' ? 'Draw on photo' : 'Take photo'} wide onClose={() => { stop(); onClose(); }}
+      footer={state.phase === 'markup' ? undefined : <>
         <button onClick={() => { stop(); onClose(); }}>Cancel</button>
         {state.phase === 'live' && <button className="primary" onClick={capture}>Capture</button>}
-        {state.phase === 'review' && <><button onClick={start}>Retake</button><button className="primary" disabled={saving} onClick={async () => { setSaving(true); try { await onAccept(state.blob); stop(); onClose(); } finally { setSaving(false); } }}>Use photo</button></>}
+        {state.phase === 'review' && <><button onClick={start}>Retake</button><button onClick={() => setState({ phase: 'markup', blob: state.blob })}>✎ {state.marked ? 'Edit drawing' : 'Draw on photo'}</button><button className="primary" disabled={saving} onClick={async () => { setSaving(true); try { await onAccept(state.blob); stop(); onClose(); } finally { setSaving(false); } }}>Use photo</button></>}
       </>}>
       {state.phase === 'error' && (
         <div role="alert"><p className="error">{state.message}</p><button className="primary" onClick={() => { stop(); onClose(); onFallback(); }}>Take photo with device camera (file picker)</button></div>
@@ -79,6 +80,7 @@ export function CameraDialog({ onAccept, onClose, onFallback }: { onAccept(blob:
       <video ref={videoRef} className="camera-video" playsInline muted hidden={state.phase !== 'live' && state.phase !== 'starting'} aria-label="Camera preview" />
       {state.phase === 'starting' && <p role="status">Starting camera…</p>}
       {state.phase === 'review' && reviewUrl && <img className="camera-video" src={reviewUrl} alt="Captured photo preview" />}
+      {state.phase === 'markup' && <PhotoMarkup src={state.blob} onCancel={() => setState({ phase: 'review', blob: state.blob })} onDone={(b) => setState({ phase: 'review', blob: b, marked: true })} />}
     </Dialog>
   );
 }

@@ -21,7 +21,7 @@ export type ProjectBundle = {
 export class RepoError extends Error {}
 
 // ---------- projects ----------
-export type ProjectInput = Partial<Pick<Project, 'name' | 'siteName' | 'address' | 'client' | 'inspector' | 'inspectionDate' | 'reference' | 'notes'>>;
+export type ProjectInput = Partial<Pick<Project, 'name' | 'siteName' | 'address' | 'client' | 'inspector' | 'inspectionDate' | 'reference' | 'notes' | 'summary'>>;
 
 export async function createProject(input: ProjectInput = {}, opts: { isSample?: boolean } = {}): Promise<Project> {
   return tracked(async () => {
@@ -157,6 +157,31 @@ export async function updateFloor(id: string, patch: Partial<Pick<Floor, 'name' 
     await db.floors.update(id, { ...next, updatedAt: nowIso() });
     await touch(f.projectId);
   });
+}
+/** Add an empty floor on top of the stack, named after the next level number. */
+export async function addFloor(projectId: string): Promise<Floor> {
+  return tracked(() => db.transaction('rw', db.floors, db.projects, async () => {
+    const all = await db.floors.where('projectId').equals(projectId).sortBy('order');
+    const names = new Set(all.map((f) => f.name.trim().toLowerCase()));
+    let n = all.length;
+    while (names.has(`level ${n}`)) n++;
+    const t = nowIso();
+    const floor: Floor = { id: uuid(), projectId, name: n === 0 ? 'Ground' : `Level ${n}`, order: (all.at(-1)?.order ?? -1) + 1, displayWidth: 100, createdAt: t, updatedAt: t };
+    await db.floors.add(floor);
+    await touch(projectId);
+    return floor;
+  }));
+}
+/** Remove a floor that has no findings (its plan, if any, goes with it). */
+export async function deleteFloor(id: string): Promise<void> {
+  return tracked(() => db.transaction('rw', [db.floors, db.findings, db.photos, db.assets, db.blobs, db.projects], async () => {
+    const f = await db.floors.get(id);
+    if (!f) return;
+    if (await db.findings.where('floorId').equals(id).count()) throw new RepoError('This floor has findings. Delete or move them first.');
+    await db.floors.delete(id);
+    if (f.planAssetId) await removeAsset(f.planAssetId);
+    await touch(f.projectId);
+  }));
 }
 /** Swap floor order with neighbour (-1 up / +1 down). */
 export async function moveFloor(id: string, dir: -1 | 1): Promise<void> {
@@ -363,14 +388,17 @@ export async function addPhoto(findingId: string, img: ProcessedImage, caption =
     const f = await db.findings.get(findingId);
     if (!f) throw new RepoError('Finding not found');
     const t = nowIso();
-    const ids = { o: uuid(), d: uuid(), t: uuid() };
+    // A compact photo stores one image for both original and display (same blob id, stored once).
+    const shared = img.display === img.original;
+    const ids = { o: uuid(), d: '', t: uuid() };
+    ids.d = shared ? ids.o : uuid();
     const asset: Asset = {
       id: uuid(), projectId: f.projectId, kind: 'photo', filename: img.filename, mime: img.mime, width: img.width, height: img.height,
       originalBlobId: ids.o, displayBlobId: ids.d, thumbnailBlobId: ids.t, orientation: img.orientation, sizeBytes: img.original.size, createdAt: t,
     };
     await db.blobs.bulkAdd([
       { id: ids.o, projectId: f.projectId, data: img.original },
-      { id: ids.d, projectId: f.projectId, data: img.display },
+      ...(shared ? [] : [{ id: ids.d, projectId: f.projectId, data: img.display }]),
       { id: ids.t, projectId: f.projectId, data: img.thumbnail },
     ]);
     await db.assets.add(asset);

@@ -4,6 +4,8 @@ import type { ProcessedImage } from '../../data/repo';
 import { ImportError, processPhoto } from '../../lib/imaging';
 import { SEVERITIES, type Category, type Severity } from '../../lib/types';
 import { CameraDialog } from '../photos/PhotoSection';
+import { PhotoMarkup } from '../photos/PhotoMarkup';
+import { Dialog } from '../../components/ui';
 
 export type NewFindingForm = { title: string; categoryId: string; severity: Severity; description: string; locationNotes: string };
 export const emptyForm = (categoryId = ''): NewFindingForm => ({ title: '', categoryId, severity: 'not_assessed', description: '', locationNotes: '' });
@@ -101,6 +103,7 @@ function PendingPhotos({ photos, setPhotos, stepNo }: { photos: ProcessedImage[]
   const toast = useToast();
   const [cameraOpen, setCameraOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [drawing, setDrawing] = useState<number | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const captureRef = useRef<HTMLInputElement>(null);
   const latest = useRef(photos);
@@ -132,8 +135,22 @@ function PendingPhotos({ photos, setPhotos, stepNo }: { photos: ProcessedImage[]
       {busy && <p className="small" role="status">{busy}</p>}
       {photos.length > 0 && (
         <ul className="pending-photos" data-testid="pending-photos">
-          {photos.map((p, i) => <PendingThumb key={i} img={p} index={i} onRemove={() => setPhotos(photos.filter((_, j) => j !== i))} />)}
+          {photos.map((p, i) => <PendingThumb key={i} img={p} index={i} onRemove={() => setPhotos(photos.filter((_, j) => j !== i))} onDraw={() => setDrawing(i)} />)}
         </ul>
+      )}
+      {drawing !== null && photos[drawing] && (
+        <Dialog title="Draw on photo" wide onClose={() => setDrawing(null)}>
+          <PhotoMarkup src={photos[drawing].original} onCancel={() => setDrawing(null)} onDone={async (b) => {
+            const i = drawing;
+            setDrawing(null);
+            if (b === photos[i].original) return;
+            try {
+              const img = await processPhoto(b, photos[i].filename);
+              latest.current = latest.current.map((x, j) => (j === i ? img : x));
+              setPhotos(latest.current);
+            } catch (e) { toast('error', e instanceof Error ? e.message : String(e)); }
+          }} />
+        </Dialog>
       )}
       {cameraOpen && <CameraDialog onClose={() => setCameraOpen(false)} onFallback={() => captureRef.current?.click()}
         onAccept={async (blob) => { await addFiles([new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' })]); }} />}
@@ -141,12 +158,13 @@ function PendingPhotos({ photos, setPhotos, stepNo }: { photos: ProcessedImage[]
   );
 }
 
-function PendingThumb({ img, index, onRemove }: { img: ProcessedImage; index: number; onRemove(): void }) {
+function PendingThumb({ img, index, onRemove, onDraw }: { img: ProcessedImage; index: number; onRemove(): void; onDraw(): void }) {
   const url = useObjectUrl(img.thumbnail);
   return (
     <li>
       {url && <img src={url} alt={`New photo ${index + 1}`} />}
       <button className="remove" aria-label={`Remove new photo ${index + 1}`} onClick={onRemove}>×</button>
+      <button className="draw" aria-label={`Draw on new photo ${index + 1}`} onClick={onDraw}>✎</button>
     </li>
   );
 }

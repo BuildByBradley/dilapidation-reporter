@@ -58,3 +58,50 @@ export function buildCsv(model: ReportModel): string {
   }
   return rows.join('\r\n') + '\r\n';
 }
+
+const SEV_RANK: Record<Severity, number> = { major: 0, moderate: 1, minor: 2, not_assessed: 3 };
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const listJoin = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs.at(-1)}`);
+
+/** Major first, then moderate (then the rest if asked): the findings a client should read first. */
+export function keyFindings(model: ReportModel, includeMinor = false): ReportFinding[] {
+  return model.floors.flatMap((f) => f.findings)
+    .filter((f) => f.severity === 'major' || f.severity === 'moderate' || includeMinor)
+    .sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity] || a.reference.localeCompare(b.reference, undefined, { numeric: true }));
+}
+
+/** Severities most serious first, for client-facing tables. */
+export const SEVERITIES_DESC = [...SEVERITIES].sort((a, b) => SEV_RANK[a.value] - SEV_RANK[b.value]);
+
+/** Floor × severity counts for the summary matrix (columns in SEVERITIES_DESC order). */
+export function floorSeverityMatrix(model: ReportModel) {
+  return model.floors.filter((f) => f.hasPlan || f.findings.length).map((f) => ({
+    floor: f.name,
+    counts: SEVERITIES_DESC.map((s) => f.findings.filter((x) => x.severity === s.value).length),
+    total: f.findings.length,
+  }));
+}
+
+/** A neutral first draft of the executive summary, built only from the recorded data. The inspector edits it. */
+export function draftSummary(model: ReportModel, p: { siteName: string; address: string; inspector: string; inspectionDate: string; name: string }): string {
+  const sev = Object.fromEntries(model.bySeverity.map((s) => [s.severity, s.count])) as Record<Severity, number>;
+  const inspected = model.floors.filter((f) => f.hasPlan);
+  const where = p.siteName || p.address || p.name;
+  const lines: string[] = [];
+  lines.push(`${p.inspector ? `${p.inspector} inspected` : 'An inspection of'} ${where}${p.inspectionDate ? ` ${p.inspector ? 'on' : 'was carried out on'} ${p.inspectionDate}` : ''}${p.inspector ? '' : ''}. ${plural(model.total, 'condition')} ${model.total === 1 ? 'was' : 'were'} recorded across ${plural(inspected.length, 'floor')}${inspected.length ? ` (${listJoin(inspected.map((f) => f.name))})` : ''}.`);
+  if (model.total) {
+    lines.push(`Of these, ${sev.major} ${sev.major === 1 ? 'is' : 'are'} rated major, ${sev.moderate} moderate and ${sev.minor} minor${sev.not_assessed ? `; ${sev.not_assessed} ${sev.not_assessed === 1 ? 'has' : 'have'} not been assessed` : ''}.`);
+    const top = model.byCategory.slice(0, 3);
+    if (top.length) lines.push(`The most frequent ${top.length === 1 ? 'category is' : 'categories are'} ${listJoin(top.map((c) => `${c.category.toLowerCase()} (${c.count})`))}.`);
+    const [busiest, next] = [...model.floors].sort((a, b) => b.findings.length - a.findings.length);
+    if (busiest && next && busiest.findings.length > next.findings.length) lines.push(`${busiest.name} has the most findings (${busiest.findings.length}).`);
+    const majors = keyFindings(model).filter((f) => f.severity === 'major');
+    if (majors.length) {
+      const shown = majors.slice(0, 5).map((f) => `${f.reference} ${f.title.toLowerCase()} (${f.floorName})`);
+      lines.push(`Major items: ${listJoin(shown)}${majors.length > 5 ? `, and ${majors.length - 5} more listed below` : ''}.`);
+    }
+  }
+  if (model.needsReview.length) lines.push(`${plural(model.needsReview.length, 'finding')} need${model.needsReview.length === 1 ? 's' : ''} its location reviewed because a floor plan was replaced after it was placed.`);
+  lines.push('This summary describes recorded observations only; it is not a structural assessment.');
+  return lines.join(' ');
+}

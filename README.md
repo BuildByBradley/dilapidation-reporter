@@ -70,7 +70,8 @@ The long-report print test additionally needs poppler (`pdftotext`, `pdfinfo`, `
    fine-tune with the nudge buttons (1 source-image pixel; 10 with Shift) and save with a title and category. Photos can be
    taken or uploaded in the same panel and are attached when the finding is saved. On a phone the panel fills the screen as
    three steps — **position** (zoomed target + arrow pad, no keyboard), **details**, **photos** — and *Show plan to re-tap*
-   collapses it so you can tap a new spot.
+   collapses it so you can tap a new spot. Photos can be drawn on (pen, circle, arrow; four colours; undo) before they are used.
+   Photos are stored compactly: one 1920 px JPEG (quality 0.75, roughly 250–400 KB) plus a thumbnail; the camera original is not kept.
    Relocation uses the same flow. In Navigate mode a tap selects a pin; overlapping pins open a chooser. `Esc` cancels.
 5. **Photos** — in a finding: *Take photo* (rear camera, preview → capture → retake/accept), *Upload photos*, or the
    device-camera file picker fallback. Captions, order, cover photo, full-size preview and delete are supported.
@@ -102,6 +103,10 @@ appear on your other devices within seconds; the status light in the top bar sho
   the server; differences are uploaded files-first, then records parent-before-child; deletions travel as tombstones.
   Incoming records wait for the plan/photo files they reference. An unsynced local edit wins over an incoming change to
   the same row; otherwise the latest write wins.
+* **Sync mode (per device).** *Manual* (default on phones): nothing is sent or received until you tap **Sync now** in the top
+  bar, which also shows how many changes are waiting — saves mobile data on site. *Automatic* (default on computers): live.
+* **Passwords:** *Forgot password?* emails a reset link (set the Supabase **Site URL** to the app's address so the link returns
+  here); *Change password* is in the account panel.
 * **Signing out** stops syncing on that device and keeps its projects locally.
 
 ## Where data lives, backups

@@ -18,6 +18,7 @@ import { FindingsList } from '../findings/FindingsList';
 import { PlacementPanel, emptyForm, type NewFindingForm } from '../findings/PlacementPanel';
 import { ImportDialog } from '../imports/ImportDialog';
 import { FloorList } from './FloorList';
+import { buildReportModel, draftSummary } from '../../lib/report';
 import { ViewerPane } from './ViewerPane';
 import type { Draft } from './engine';
 
@@ -294,7 +295,7 @@ export function Workspace({ projectId }: { projectId: string }) {
         </section>
         <aside id="drawer-left" className={`drawer drawer-left${drawer === 'left' ? ' open' : ''}`} aria-label="Floors" inert={drawer !== 'left'}>
           <button className="drawer-close" onClick={() => setDrawer(null)}>‹ Close</button>
-          <FloorList floors={floors} counts={counts} mode={viewer} readOnly={readOnly}
+          <FloorList projectId={projectId} floors={floors} counts={counts} mode={viewer} readOnly={readOnly}
             onSelect={(id) => { setDrawer(null); selectFloor(id); }} onImport={(id) => { setDrawer(null); setImportFor(id); }} onOverview={() => { setDrawer(null); toOverview(); }} />
         </aside>
         <aside id="drawer-right" className={`drawer drawer-right${drawer === 'right' ? ' open' : ''}`} aria-label="Findings" inert={drawer !== 'right'}>
@@ -322,7 +323,7 @@ export function Workspace({ projectId }: { projectId: string }) {
       {banners}
       <div className={`ws-body${panelOpen ? '' : ' panel-closed'}`}>
         <aside className="ws-left">
-          <FloorList floors={floors} counts={counts} mode={viewer} readOnly={readOnly} onSelect={selectFloor} onImport={setImportFor} onOverview={toOverview} />
+          <FloorList projectId={projectId} floors={floors} counts={counts} mode={viewer} readOnly={readOnly} onSelect={selectFloor} onImport={setImportFor} onOverview={toOverview} />
         </aside>
         <main className="ws-main">{viewerPane}</main>
         <aside className="ws-right" aria-label="Findings panel">
@@ -343,7 +344,12 @@ export function Workspace({ projectId }: { projectId: string }) {
 
 function ProjectDetails({ project, onClose, readOnly }: { project: ProjectT; onClose: () => void; readOnly: boolean }) {
   const toast = useToast();
-  const [d, setD] = useState({ name: project.name, siteName: project.siteName, address: project.address, client: project.client, inspector: project.inspector, inspectionDate: project.inspectionDate, reference: project.reference, notes: project.notes });
+  const [d, setD] = useState({ name: project.name, siteName: project.siteName, address: project.address, client: project.client, inspector: project.inspector, inspectionDate: project.inspectionDate, reference: project.reference, notes: project.notes, summary: project.summary ?? '' });
+  const draft = async () => {
+    const text = draftSummary(buildReportModel(await repo.loadBundle(project.id)), d);
+    if (d.summary.trim() && !window.confirm('Replace the current summary with a fresh draft from the findings?')) return;
+    setD({ ...d, summary: text });
+  };
   const set = (k: keyof typeof d) => (e: { target: { value: string } }) => setD({ ...d, [k]: e.target.value });
   return (
     <Dialog title="Project details" onClose={onClose} footer={<><button onClick={onClose}>Cancel</button><button className="primary" disabled={readOnly} onClick={async () => { try { await repo.updateProject(project.id, d); onClose(); } catch (e) { toast('error', String(e)); } }}>Save</button></>}>
@@ -356,6 +362,10 @@ function ProjectDetails({ project, onClose, readOnly }: { project: ProjectT; onC
         <label>Inspection date<input type="date" value={d.inspectionDate} onChange={set('inspectionDate')} /></label>
         <label>Reference<input value={d.reference} onChange={set('reference')} /></label>
         <label className="span2">Notes<textarea rows={3} value={d.notes} onChange={set('notes')} /></label>
+        <label className="span2">Executive summary <span className="muted small">(first pages of the report — what the client reads first)</span>
+          <textarea rows={7} value={d.summary} onChange={set('summary')} placeholder="Overall condition, the main issues and what needs attention. Use “Draft from findings” for a first version." />
+        </label>
+        <div className="span2 row"><button type="button" disabled={readOnly} onClick={() => void draft().catch((e) => toast('error', String(e)))}>Draft from findings</button><span className="small muted">Builds a neutral first draft from the recorded findings; edit it before issuing.</span></div>
       </div>
     </Dialog>
   );
