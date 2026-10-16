@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ViewerEngine, type Draft, type ViewFloor, type ViewPin } from './engine';
 import { usePlanBitmaps } from './usePlanBitmaps';
+import { useVectorDetail } from './useVectorDetail';
 import type { Category, Finding, Floor, InteractionMode, ViewerMode } from '../../lib/types';
 import type { UV } from '../../lib/coords';
 
@@ -61,6 +62,8 @@ export function ViewerPane(p: ViewerPaneProps) {
     watchDpr(); measure();
     return () => { ro.disconnect(); mq?.removeEventListener('change', onDpr); engine.detach(); if (window.__inspector?.engine === engine) delete window.__inspector; };
   }, [engine]);
+
+  useVectorDetail(engine, p.floors);
 
   // data -> engine
   const viewFloors: ViewFloor[] = useMemo(() => p.floors.map((f) => ({

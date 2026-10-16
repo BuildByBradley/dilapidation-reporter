@@ -8,6 +8,8 @@ import type { InteractionMode, ViewerMode } from '../../lib/types';
 export type ViewFloor = { id: string; name: string; image: ImageBitmap | null; displayWidth: number; findingCount: number };
 export type ViewPin = { id: string; floorId: string; u: number; v: number; colour: string; reference: string; needsReview: boolean };
 export type Draft = { floorId: string; u: number; v: number; relocating?: boolean } | null;
+/** A sharp re-render of part of a plan (from the original PDF), placed over the base image at its uv rectangle. */
+export type DetailTile = { floorId: string; bitmap: ImageBitmap; u0: number; v0: number; u1: number; v1: number };
 
 export type EngineEvents = {
   floorPick(id: string): void;
@@ -52,6 +54,8 @@ export class ViewerEngine {
   private insets = { top: 64, bottom: 40, side: 0 };
   private gestures: GestureTracker;
   private cleanup: (() => void)[] = [];
+  private detail: DetailTile | null = null;
+  private viewListeners = new Set<() => void>();
 
   constructor(private events: EngineEvents) {
     this.gestures = new GestureTracker({
@@ -147,6 +151,42 @@ export class ViewerEngine {
   setDraft(d: Draft) { this.draft = d; this.invalidate(); }
   setInteraction(i: InteractionMode) { this.interaction = i; this.invalidate(); }
   getFloorImage(id: string) { return this.floors.find((f) => f.id === id)?.image ?? null; }
+  /** Replace the sharp detail tile (the previous one's bitmap is released). */
+  setDetail(t: DetailTile | null) {
+    if (this.detail && this.detail !== t) this.detail.bitmap.close();
+    this.detail = t; this.invalidate();
+  }
+  getDetail() { return this.detail; }
+  /** Called after each frame is drawn (the vector-detail renderer debounces on it). */
+  onView(cb: () => void) { this.viewListeners.add(cb); return () => { this.viewListeners.delete(cb); }; }
+  /** Busy = animating or a gesture in progress: no point rendering detail yet. */
+  isBusy() { return !!this.tween || this.gestures.pointerCount > 0 || this.populated().some((f) => (this.alpha.get(f.id) ?? 0) !== (this.targetAlpha.get(f.id) ?? 0)); }
+  /**
+   * For the single floor in view: the visible part of the plan (uv rectangle, clamped to the plan) and how many
+   * device pixels one base-image pixel currently covers. Null in the building overview.
+   */
+  viewOfFloor(): { floorId: string; u0: number; v0: number; u1: number; v1: number; devicePxPerImagePx: number } | null {
+    const m = this.mode;
+    if (m.kind === 'overview3d' || !this.w) return null;
+    const f = this.floors.find((x) => x.id === m.floorId);
+    if (!f?.image) return null;
+    const s = this.size(f), y = this.elevationOf(f.id), img = f.image;
+    const mat = planeMatrix(this.cam, s.W, s.H, y, img.width, img.height, this.w / 2, this.h / 2);
+    const scale = Math.max(Math.hypot(mat.a, mat.b), Math.hypot(mat.c, mat.d)) * this.dpr;
+    // invert the image→screen affine map to find where the screen corners fall on the plan (unclamped)
+    const det = mat.a * mat.d - mat.b * mat.c;
+    if (Math.abs(det) < 1e-12) return null;
+    const toUv = (x: number, yy: number) => {
+      const dx = x - mat.e, dy = yy - mat.f;
+      return { u: (mat.d * dx - mat.c * dy) / det / img.width, v: (-mat.b * dx + mat.a * dy) / det / img.height };
+    };
+    const pts = [[0, 0], [this.w, 0], [0, this.h], [this.w, this.h]].map(([x, yy]) => toUv(x, yy));
+    const us = pts.map((p) => p.u), vs = pts.map((p) => p.v);
+    const c = (x: number) => Math.min(1, Math.max(0, x));
+    const r = { u0: c(Math.min(...us)), v0: c(Math.min(...vs)), u1: c(Math.max(...us)), v1: c(Math.max(...vs)) };
+    if (r.u1 - r.u0 < 1e-4 || r.v1 - r.v0 < 1e-4) return null;
+    return { floorId: f.id, ...r, devicePxPerImagePx: scale };
+  }
 
   private populated() { return this.floors.filter((f) => f.image); }
   private size(f: ViewFloor) { return planeSize(f.displayWidth, f.image!.width, f.image!.height); }
@@ -333,6 +373,10 @@ export class ViewerEngine {
       ctx.shadowColor = 'transparent';
       ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(img, 0, 0);
+      const t = this.detail;
+      if (t && t.floorId === f.id && mode.kind !== 'overview3d') {
+        ctx.drawImage(t.bitmap, t.u0 * img.width, t.v0 * img.height, (t.u1 - t.u0) * img.width, (t.v1 - t.v0) * img.height);
+      }
       ctx.restore();
       // outline
       const corners = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]].map(([u, v]) => project(this.cam, u * s.W, y, v * s.H, cx, cy));
@@ -361,6 +405,7 @@ export class ViewerEngine {
       const sp = this.uvToScreen(this.draft.floorId, this.draft.u, this.draft.v);
       if (sp) this.drawCrosshair(ctx, sp.x, sp.y);
     }
+    this.viewListeners.forEach((l) => l());
   }
 
   private drawFloorLabel(ctx: CanvasRenderingContext2D, f: ViewFloor, corners: { x: number; y: number }[], a: number) {
@@ -426,8 +471,17 @@ export class ViewerEngine {
     if (!img || !ctx) return;
     const cx = u * img.width, cy = v * img.height, half = cropPx / 2;
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, target.width, target.height);
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, cx - half, cy - half, cropPx, cropPx, 0, 0, target.width, target.height);
+    const t = this.detail;
+    const tu = half / img.width, tv = half / img.height;
+    if (t && t.floorId === floorId && u - tu >= t.u0 && u + tu <= t.u1 && v - tv >= t.v0 && v + tv <= t.v1) {
+      // sharp tile (PDF re-render) covers the magnified area: use it
+      const k = t.bitmap.width / ((t.u1 - t.u0) * img.width);
+      ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(t.bitmap, (cx - t.u0 * img.width - half) * k, (cy - t.v0 * img.height - half) * k, cropPx * k, cropPx * k, 0, 0, target.width, target.height);
+    } else {
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, cx - half, cy - half, cropPx, cropPx, 0, 0, target.width, target.height);
+    }
     const c = target.width / 2;
     ctx.lineWidth = 1; ctx.strokeStyle = '#d6246e';
     ctx.beginPath(); ctx.moveTo(c, 0); ctx.lineTo(c, target.height); ctx.moveTo(0, c); ctx.lineTo(target.width, c); ctx.stroke();
