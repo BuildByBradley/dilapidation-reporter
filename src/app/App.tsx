@@ -4,6 +4,7 @@ import { ProjectHome } from '../features/projects/ProjectHome';
 import { Workspace } from '../features/viewer/Workspace';
 import { ReportView } from '../features/reports/ReportView';
 import { PasswordRecoveryDialog } from '../components/Cloud';
+import { UpdateBanner } from '../components/UpdateBanner';
 
 type Route = { name: 'home' } | { name: 'project'; id: string } | { name: 'report'; id: string };
 function parse(hash: string): Route {
@@ -26,6 +27,7 @@ export function App() {
       {route.name === 'project' && <Workspace key={route.id} projectId={route.id} />}
       {route.name === 'report' && <ReportView key={route.id} projectId={route.id} />}
       <PasswordRecoveryDialog />
+      <UpdateBanner />
     </ToastProvider>
   );
 }

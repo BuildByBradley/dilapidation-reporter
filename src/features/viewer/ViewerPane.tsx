@@ -63,7 +63,7 @@ export function ViewerPane(p: ViewerPaneProps) {
     return () => { ro.disconnect(); mq?.removeEventListener('change', onDpr); engine.detach(); if (window.__inspector?.engine === engine) delete window.__inspector; };
   }, [engine]);
 
-  useVectorDetail(engine, p.floors);
+  const detail = useVectorDetail(engine, p.floors);
 
   // data -> engine
   const viewFloors: ViewFloor[] = useMemo(() => p.floors.map((f) => ({
@@ -113,7 +113,11 @@ export function ViewerPane(p: ViewerPaneProps) {
       />
       {importedCount === 0 && <div className="viewer-empty"><p>No floor plans yet. Use <strong>Import</strong> on a floor to add a PNG, JPEG or PDF plan.</p></div>}
       {errList.length > 0 && <div className="viewer-error" role="alert">{errList[0]}</div>}
-      {floorName && <div className="viewer-title">{floorName}<span className="muted small"> · {is2d ? '2D' : '3D'}</span></div>}
+      {floorName && <div className="viewer-title">{floorName}<span className="muted small"> · {is2d ? '2D' : '3D'}</span>
+        {detail.kind === 'sharp' && <span className="small detail-ok" data-testid="detail-status" title="Zoomed areas are re-drawn from the original PDF"> · PDF sharp</span>}
+        {detail.kind === 'failed' && <span className="small detail-bad" data-testid="detail-status" title={detail.reason}> · ⚠ not sharp</span>}
+      </div>}
+      {detail.kind === 'failed' && <div className="viewer-note" role="status">Zoomed plan is not sharp on this device: {detail.reason}.</div>}
       {placing && <div className="viewer-banner" role="status">{p.interaction.kind === 'relocatePin' ? 'Relocating pin' : 'Add pin'}: tap the plan to propose a location, adjust, then confirm. Press Esc to cancel.</div>}
 
       <div className="viewer-tools" role="toolbar" aria-label="Viewer tools">

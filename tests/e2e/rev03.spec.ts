@@ -89,3 +89,13 @@ test('a compact photo upload is resized to 1920 px and stored once', async ({ pa
   await page.getByTestId('finding-editor').getByLabel('Upload photos').setInputFiles(demo('photo-landscape.jpg'));
   await expect.poll(async () => (await dbAll(page, 'assets')).filter((a) => a.kind === 'photo').length, { timeout: 20_000 }).toBe(7);
 });
+
+test('a long-open tab is told when a newer version is published', async ({ page }) => {
+  await page.route(/\/\?v=\d+$/, async (route) => {
+    const res = await route.fetch();
+    await route.fulfill({ response: res, body: (await res.text()).replace(/assets\/index-[\w-]+\.js/, 'assets/index-NEWER123.js') });
+  });
+  await page.goto('/');
+  await expect(page.getByTestId('update-banner')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId('update-banner')).toContainText('newer version');
+});
