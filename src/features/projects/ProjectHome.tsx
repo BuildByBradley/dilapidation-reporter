@@ -7,6 +7,7 @@ import { downloadBlob } from '../../lib/imaging';
 import { useLive } from '../../lib/useLive';
 import { loadSampleProject } from './sample';
 import { SaveIndicator } from '../../components/SaveIndicator';
+import { StorageBar } from '../../components/StorageBar';
 
 type Details = Required<repo.ProjectInput>;
 const empty = (): Details => ({ name: '', siteName: '', address: '', client: '', inspector: '', inspectionDate: new Date().toISOString().slice(0, 10), reference: '', notes: '' });
@@ -71,7 +72,7 @@ export function ProjectHome() {
         <h1>Dilapidation Inspector</h1>
         <span className="tag">Prototype</span>
         <span className="spacer" />
-        <SaveIndicator />
+        <SaveIndicator /><StorageBar />
       </header>
       <main className="content">
         <div className="toolbar-row">

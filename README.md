@@ -138,6 +138,12 @@ enable it under **Settings → General → About → Certificate Trust Settings*
 * `ACCEPTANCE.md` — pass / fail / not-tested for A01–A24 with evidence and the exact commands run.
 * `docs/MANUAL-CHECKLIST.md` — the physical touch-device and print checklist that automated tests cannot replace.
 
+## Storage and quick capture
+
+* **Storage saver (default):** photos are saved as one compressed 1920 px JPEG plus a thumbnail, roughly 5–10× smaller than keeping the camera original. Turn on *Keep full-size original photos* in the storage dialog to also keep the untouched file. The setting applies to photos added afterwards.
+* **Storage bar:** shown in the project header and on the project list. Click it for usage, an estimate of how many more photos fit, the budget (MB) and the keep-originals switch. It turns amber at 70% and red at 90%.
+* **Film + speak:** in a finding, hold the button while pointing the camera and describing the defect. Up to three still frames and the transcript are offered for review, with suggested category and severity; nothing is saved until you press *Add to finding*, and every field stays editable. No video is stored.
+
 ## Known limitations (read before relying on this)
 
 * **Not verified on tablet Safari or any physical touch device.** Gestures are tested with synthetic Pointer Events in headless
@@ -146,7 +152,9 @@ enable it under **Settings → General → About → Certificate Trust Settings*
   real tablets.
 * Viewer camera state (per-floor 2D/3D) is kept in memory for the session; it is not persisted across reloads.
 * The sample photo fixtures reuse three images, so the 500-photo scale test did not exercise 500 distinct large photos in memory.
-* No offline cold-start / PWA install, no undo, no multi-user sync, no HEIC, no OCR or CAD parsing.
+* No offline cold-start / PWA install, no undo, no multi-user sync (see [`docs/MULTI-USER.md`](docs/MULTI-USER.md) for the proposed design), no HEIC, no OCR or CAD parsing.
+* Quick capture takes still frames from the live camera and uses the browser's speech-to-text where it exists (Chrome/Edge/Android and recent Safari; not Firefox). Category and severity are keyword suggestions, not AI. Voice audio is not stored. Not yet verified on real devices.
+* The storage bar counts images in this browser against an adjustable budget (default 1 GB); it is not connected to any hosting plan.
 * The Web Locks API protects against two-tab edits; browsers without it get a warning instead.
 * The PDF.js worker adds ~1.4 MB to the build (loaded only when a PDF is imported).
 * Browser Save-as-PDF output varies by browser; only Chromium’s print engine has been inspected.

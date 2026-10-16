@@ -6,6 +6,7 @@ export class ImportError extends Error {}
 export const CANCELLED = 'Cancelled';
 export type Progress = (fraction: number, label: string) => void;
 type Opts = { signal?: AbortSignal; onProgress?: Progress };
+export type PhotoOpts = Opts & { keepOriginal?: boolean };
 
 const check = (s?: AbortSignal) => { if (s?.aborted) throw new ImportError(CANCELLED); };
 const mb = (n: number) => Math.round(n / 1024 / 1024);
@@ -82,20 +83,26 @@ async function derive(src: CanvasImageSource, w: number, h: number, original: Bl
   };
 }
 
-export async function processPhoto(file: Blob, filename: string, o: Opts = {}): Promise<ProcessedImage> {
+/**
+ * Photos are stored compressed by default ("storage saver"): a 1920 px JPEG replaces the camera original, which is
+ * typically 5-10x larger. Pass `keepOriginal` to also keep the untouched file (and the larger 2560 px display copy).
+ * When the original is not kept, `original` is the very same Blob as `display` so the repository stores it once.
+ */
+export async function processPhoto(file: Blob, filename: string, o: PhotoOpts = {}): Promise<ProcessedImage> {
   o.onProgress?.(0.05, 'Checking photo');
   const { mime, orientation } = await validateRaster(file, filename, LIMITS.maxPhotoBytes, 'photo');
   check(o.signal);
   const bmp = await decodeBitmap(file);
   try {
     o.onProgress?.(0.4, 'Processing');
+    const keep = !!o.keepOriginal;
     // re-encoding through a canvas drops EXIF/GPS from the derivatives
-    const disp = scaled(bmp, bmp.width, bmp.height, LIMITS.photoReportEdge, true);
-    const display = await canvasToBlob(disp, 'image/jpeg', 0.85);
+    const disp = scaled(bmp, bmp.width, bmp.height, keep ? LIMITS.photoReportEdge : LIMITS.photoSaverEdge, true);
+    const display = await canvasToBlob(disp, 'image/jpeg', keep ? 0.85 : LIMITS.photoSaverQuality);
     check(o.signal);
     const thumbnail = await canvasToBlob(scaled(disp, disp.width, disp.height, LIMITS.thumbEdge, true), 'image/jpeg', 0.8);
     o.onProgress?.(1, 'Done');
-    return { filename, mime, width: disp.width, height: disp.height, original: file, display, thumbnail, orientation };
+    return { filename, mime: keep ? mime : 'image/jpeg', width: disp.width, height: disp.height, original: keep ? file : display, display, thumbnail, orientation: keep ? orientation : 1 };
   } finally { bmp.close(); }
 }
 

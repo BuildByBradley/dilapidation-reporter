@@ -364,12 +364,14 @@ export async function addPhoto(findingId: string, img: ProcessedImage, caption =
     if (!f) throw new RepoError('Finding not found');
     const t = nowIso();
     const ids = { o: uuid(), d: uuid(), t: uuid() };
+    const shared = img.original === img.display; // storage saver: no separate original, store the image once
     const asset: Asset = {
       id: uuid(), projectId: f.projectId, kind: 'photo', filename: img.filename, mime: img.mime, width: img.width, height: img.height,
-      originalBlobId: ids.o, displayBlobId: ids.d, thumbnailBlobId: ids.t, orientation: img.orientation, sizeBytes: img.original.size, createdAt: t,
+      originalBlobId: shared ? ids.d : ids.o, displayBlobId: ids.d, thumbnailBlobId: ids.t, orientation: img.orientation,
+      sizeBytes: (shared ? 0 : img.original.size) + img.display.size + img.thumbnail.size, createdAt: t,
     };
     await db.blobs.bulkAdd([
-      { id: ids.o, projectId: f.projectId, data: img.original },
+      ...(shared ? [] : [{ id: ids.o, projectId: f.projectId, data: img.original }]),
       { id: ids.d, projectId: f.projectId, data: img.display },
       { id: ids.t, projectId: f.projectId, data: img.thumbnail },
     ]);

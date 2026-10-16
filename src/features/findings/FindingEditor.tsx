@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { QuickCaptureDialog, type QuickCaptureResult } from '../capture/QuickCaptureDialog';
 import { PhotoSection } from '../photos/PhotoSection';
 import { Confirm, useToast } from '../../components/ui';
 import { registerFlush } from '../../data/flush';
 import * as repo from '../../data/repo';
+import { processPhoto } from '../../lib/imaging';
+import { getStoragePrefs } from '../../lib/storagePrefs';
+import { appendText } from '../../lib/voiceDraft';
 import { SEVERITIES, type Category, type Finding, type Floor, type Photo, type Severity } from '../../lib/types';
 
 type Fields = { title: string; description: string; locationNotes: string; severity: Severity; categoryId: string };
@@ -17,6 +21,7 @@ export function FindingEditor({ finding, categories, floors, photos, readOnly, o
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [capturing, setCapturing] = useState(false);
   const latest = useRef({ f, dirty, id: finding.id, base: pick(finding) });
   latest.current = { f, dirty, id: finding.id, base: pick(finding) };
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -50,6 +55,19 @@ export function FindingEditor({ finding, categories, floors, photos, readOnly, o
     clearTimeout(timer.current);
     if (immediate) void save(); else timer.current = setTimeout(() => void save(), 500);
   };
+  const applyCapture = async (r: QuickCaptureResult) => {
+    const stamp = Date.now();
+    for (let i = 0; i < r.frames.length; i++) {
+      const img = await processPhoto(new File([r.frames[i]], `capture-${stamp}-${i + 1}.jpg`, { type: 'image/jpeg' }), `capture-${stamp}-${i + 1}.jpg`, { keepOriginal: getStoragePrefs().keepOriginals });
+      await repo.addPhoto(finding.id, img);
+    }
+    const patch: Partial<Fields> = {};
+    if (r.transcript) patch.description = appendText(latest.current.f.description, r.transcript);
+    if (r.categoryId) patch.categoryId = r.categoryId;
+    if (r.severity) patch.severity = r.severity;
+    if (Object.keys(patch).length) change(patch, true);
+    toast('ok', `Added ${r.frames.length} photo${r.frames.length === 1 ? '' : 's'}${r.transcript ? ' and your note' : ''}`);
+  };
   const floor = floors.find((x) => x.id === finding.floorId);
   const selectable = categories.filter((c) => !c.archived || c.id === f.categoryId);
 
@@ -80,11 +98,13 @@ export function FindingEditor({ finding, categories, floors, photos, readOnly, o
       <label>Location notes<textarea rows={2} value={f.locationNotes} disabled={readOnly} onChange={(e) => change({ locationNotes: e.target.value })} /></label>
       {error && <div className="error" role="alert">Not saved: {error} <button onClick={() => void save()}>Retry save</button></div>}
       {dirty && !error && <p className="small muted" aria-live="polite">Unsaved changes…</p>}
+      {!readOnly && <div className="row"><button onClick={() => setCapturing(true)} data-testid="quick-capture">Film + speak (hold to record)</button></div>}
       <PhotoSection findingId={finding.id} photos={photos} readOnly={readOnly} />
       <div className="row">
         <button disabled={readOnly} onClick={onRelocate}>Relocate pin</button>
         <button className="danger" disabled={readOnly} onClick={() => setConfirmDelete(true)}>Delete finding</button>
       </div>
+      {capturing && <QuickCaptureDialog categories={categories} currentCategoryId={f.categoryId} currentSeverity={f.severity} onAccept={applyCapture} onClose={() => setCapturing(false)} />}
       {confirmDelete && (
         <Confirm title="Delete finding?" danger confirmLabel="Delete finding" onCancel={() => setConfirmDelete(false)}
           onConfirm={async () => { setConfirmDelete(false); try { await repo.deleteFinding(finding.id); onDeleted(); } catch (e) { toast('error', e instanceof Error ? e.message : String(e)); } }}>

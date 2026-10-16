@@ -25,8 +25,8 @@ export async function createBackup(b: ProjectBundle): Promise<Uint8Array> {
   };
   files['manifest.json'] = strToU8(JSON.stringify(manifest, null, 2));
   files['README.txt'] = strToU8(
-    'Dilapidation Inspector project backup.\nmanifest.json describes the project; blobs/ holds original plans, display derivatives, thumbnails and photo originals.\n' +
-    'Original photo files are retained as captured and may contain embedded location (GPS) metadata. Report/display derivatives do not.\n');
+    'Dilapidation Inspector project backup.\nmanifest.json describes the project; blobs/ holds original plans, display derivatives, thumbnails and photo images.\n' +
+    'Photos are compressed by default. If "Keep full-size original photos" was on, the untouched camera files are included and may contain embedded location (GPS) metadata. Display derivatives do not.\n');
   return zipSync(files);
 }
 

@@ -5,6 +5,7 @@ import { db } from '../../data/db';
 import * as repo from '../../data/repo';
 import { useStoredBlob } from '../../data/useBlob';
 import { processPhoto, ImportError } from '../../lib/imaging';
+import { getStoragePrefs } from '../../lib/storagePrefs';
 import { useLive } from '../../lib/useLive';
 import type { Photo } from '../../lib/types';
 
@@ -96,7 +97,7 @@ export function PhotoSection({ findingId, photos, readOnly }: { findingId: strin
     for (const f of files) {
       setBusy(`Processing ${f.name}…`);
       try {
-        const img = await processPhoto(f, f.name || 'photo.jpg', { onProgress: (_p, l) => setBusy(`${f.name}: ${l}`) });
+        const img = await processPhoto(f, f.name || 'photo.jpg', { keepOriginal: getStoragePrefs().keepOriginals, onProgress: (_p, l) => setBusy(`${f.name}: ${l}`) });
         await repo.addPhoto(findingId, img);
       } catch (e) {
         toast('error', e instanceof ImportError ? e.message : `Could not attach "${f.name}": ${e instanceof Error ? e.message : String(e)}`);
