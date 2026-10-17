@@ -25,9 +25,9 @@ class FakeCloud {
       },
       async fetchSince(since) { check(); return [...self.records.values()].filter((r) => !since || r.updated_at > since).map((r) => structuredClone(r)); },
       async fetchOne(kind: Kind, id) { check(); const r = self.records.get(`${kind}:${id}`); return r ? structuredClone(r) : null; },
-      async uploadBlob(id, b) { check(); self.files.set(id, b); },
+      async uploadBlob(id, _p, b) { check(); self.files.set(id, b); },
       async downloadBlob(id) { check(); return self.files.get(id) ?? null; },
-      async deleteBlobs(ids) { check(); ids.forEach((id) => self.files.delete(id)); },
+      async deleteBlobs(items) { check(); items.forEach((x) => self.files.delete(x.id)); },
       subscribe(on, onLive) { self.subs.add(on); onLive(true); return () => self.subs.delete(on); },
     };
   }
@@ -189,6 +189,40 @@ describe('phone → PC live sync', () => {
     await on(pc.db, () => repo.deleteFloor(f.id));
     await settle(pc.engine, phone.engine);
     expect(await phone.db.floors.get(f.id)).toBeUndefined();
+    phone.engine.stop(); pc.engine.stop();
+  });
+
+  it('leaving a shared project removes it from this device without deleting it for others', async () => {
+    const owner = device('owner'), member = device('member');
+    const p = await on(owner.db, () => repo.createProject({ name: 'Shared block' }));
+    await owner.engine.start(); await member.engine.start(); await settle(owner.engine, member.engine);
+    expect(await member.db.projects.get(p.id)).toBeTruthy();
+    await on(member.db, () => repo.removeProjectLocally(p.id));
+    await settle(member.engine, owner.engine);
+    expect(await member.db.projects.get(p.id)).toBeUndefined();
+    expect(cloud.records.get(`projects:${p.id}`)?.deleted).toBe(false);
+    expect([...cloud.records.values()].some((r) => r.deleted)).toBe(false);
+    expect(await owner.db.projects.get(p.id)).toBeTruthy();
+    owner.engine.stop(); member.engine.stop();
+  });
+
+  it('a photo whose finding event was missed fetches the finding first', async () => {
+    const phone = device('phone'), pc = device('pc');
+    await pc.engine.start();
+    const { f } = await on(phone.db, async () => {
+      const p = await repo.createProject({ name: 'Gap' });
+      const [floor] = await repo.listFloors(p.id);
+      await repo.setFloorPlan(floor.id, img(3));
+      const cats = await repo.listCategories(p.id);
+      const f = await repo.createFinding({ floorId: floor.id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: 'Gap test' });
+      return { f };
+    });
+    await phone.engine.start(); await settle(phone.engine, pc.engine);
+    await pc.db.findings.delete(f.id); await pc.db.sync.delete(`findings:${f.id}`); // as if its live event never arrived
+    await on(phone.db, () => repo.addPhoto(f.id, img(4)));
+    await settle(phone.engine, pc.engine);
+    expect((await pc.db.findings.get(f.id))?.title).toBe('Gap test');
+    expect(await pc.db.photos.where('findingId').equals(f.id).count()).toBe(1);
     phone.engine.stop(); pc.engine.stop();
   });
 });

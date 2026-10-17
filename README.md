@@ -109,6 +109,33 @@ appear on your other devices within seconds; the status light in the top bar sho
   here); *Change password* is in the account panel.
 * **Signing out** stops syncing on that device and keeps its projects locally.
 
+## Sharing projects (rev 04)
+
+Owner: *Project ▾ → Share project…* → choose **Editor** or **Viewer** → *Create invite link* → send it (WhatsApp, email…).
+The invitee opens the link (`#/join/<token>`), signs in or creates an account, and the project syncs to them. Links are
+single-use and expire after 14 days; the owner can change roles, remove people and revoke unused links. Viewers get a
+read-only workspace. Non-owners *Leave* a project (removed from their devices only); only the owner can delete it for everyone.
+
+Server setup: run [`supabase/sharing.sql`](supabase/sharing.sql) once (after `setup.sql`). It changes `records` to one row per
+record shared by all members, adds `project_members` / `project_invites` with row-level security, the `accept_invite()`
+function, and per-project file folders (`<projectId>/<fileId>`). Until it is run the app keeps working exactly as before
+(it detects the schema). After it is run, each owner's device moves its old files into the per-project folders automatically.
+Invite links are used instead of invite-by-email because email addresses are not verified on this project.
+
+## Help assistant and suggestions (rev 04)
+
+The **?** button opens Help: *Ask* (an AI assistant answering from the user guide), *Guide* (the same guide, searchable,
+works offline) and *Suggest an improvement* (stored in `public.feedback` and emailed to the owner).
+The guide lives in [`supabase/functions/assistant/guide.ts`](supabase/functions/assistant/guide.ts) — keep it current.
+
+Server setup:
+1. Run [`supabase/feedback.sql`](supabase/feedback.sql).
+2. Deploy the Edge Function [`supabase/functions/assistant`](supabase/functions/assistant) (`index.ts` + `guide.ts`), e.g.
+   `supabase functions deploy assistant`, or Dashboard → Edge Functions → Deploy a new function → Via Editor (name it `assistant`).
+3. Secrets (Dashboard → Edge Functions → Secrets): `ANTHROPIC_API_KEY` (for Ask), and optionally `RESEND_API_KEY` +
+   `OWNER_EMAIL` to email each suggestion (with Resend's test sender, only your Resend account's own address can receive).
+Without the function, the Guide still works and suggestions are saved to the table.
+
 ## Where data lives, backups
 
 * Everything is stored in this browser’s **IndexedDB** database `dilapidation-inspector` (blobs for plans/photos, records for the rest).

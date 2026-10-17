@@ -1,5 +1,5 @@
 import type { InspectorDb, SyncRow } from '../data/db';
-import type { Asset, Floor, Photo } from '../lib/types';
+import type { Asset, Finding, Floor, Photo } from '../lib/types';
 
 /**
  * Two-way sync between this browser's IndexedDB and the cloud.
@@ -24,9 +24,10 @@ export interface Remote {
   /** Every record changed after `since` (exclusive), oldest first. `null` means everything. */
   fetchSince(since: string | null): Promise<RemoteRecord[]>;
   fetchOne(kind: Kind, id: string): Promise<RemoteRecord | null>;
-  uploadBlob(id: string, blob: Blob): Promise<void>;
-  downloadBlob(id: string): Promise<Blob | null>;
-  deleteBlobs(ids: string[]): Promise<void>;
+  /** Files are stored per project (members of a shared project can all reach them). */
+  uploadBlob(id: string, projectId: string, blob: Blob): Promise<void>;
+  downloadBlob(id: string, projectId: string): Promise<Blob | null>;
+  deleteBlobs(items: { id: string; projectId: string }[]): Promise<void>;
   /** Live feed of record changes. `onLive(true)` when connected (and again after each reconnect). */
   subscribe(onRecord: (r: RemoteRecord) => void, onLive: (live: boolean) => void): () => void;
 }
@@ -155,6 +156,12 @@ export class SyncEngine {
     this.pushTimer = setTimeout(() => { void this.push(); }, delay);
   }
 
+  /** Re-read everything this account can see (after joining a shared project, whose records are older than the cursor). */
+  async resyncAll(): Promise<void> {
+    await this.db.meta.delete(CURSOR);
+    await this.syncNow();
+  }
+
   /** Wait until queued incoming changes have been applied (tests, and before reporting "synced"). */
   idle(): Promise<unknown> { return this.queue; }
 
@@ -201,17 +208,21 @@ export class SyncEngine {
     if (!(local && hashRow(local) === h)) {
       if (r.kind === 'assets') await this.fetchBlobs(r.data as Asset);
       if (r.kind === 'floors' && (r.data as Floor).planAssetId) await this.ensureAsset((r.data as Floor).planAssetId!);
-      if (r.kind === 'photos') await this.ensureAsset((r.data as Photo).assetId);
+      if (r.kind === 'photos') { await this.ensureAsset((r.data as Photo).assetId); await this.ensureRecord('findings', (r.data as Photo).findingId); }
+      if (r.kind === 'findings') { await this.ensureRecord('floors', (r.data as Finding).floorId); await this.ensureRecord('categories', (r.data as Finding).categoryId); }
       await table.put(r.data);
     }
     await this.db.sync.put({ key: k, kind: r.kind, id: r.id, projectId: r.project_id, hash: h });
   }
 
   /** A floor or photo can arrive before its image record (e.g. live events racing a catch-up); fetch it first. */
-  private async ensureAsset(id: string) {
-    if (await this.db.assets.get(id)) return;
-    const r = await this.remote.fetchOne('assets', id);
-    if (r) await this.apply(r);
+  private async ensureAsset(id: string) { await this.ensureRecord('assets', id); }
+
+  /** A record can arrive before the one it belongs to (a missed live event); fetch the parent directly. */
+  private async ensureRecord(kind: Kind, id: string | undefined) {
+    if (!id || (await this.db.table(kind).get(id))) return;
+    const r = await this.remote.fetchOne(kind, id);
+    if (r && !r.deleted) await this.apply(r);
   }
 
   private async fetchBlobs(a: Asset) {
@@ -221,7 +232,7 @@ export class SyncEngine {
   /** Download one file. If it is not in the cloud yet, remember it and try again on later pulls. */
   private async fetchBlob(id: string, projectId: string): Promise<void> {
     if (await this.db.blobs.get(id)) { await this.setMissing(id, null); return; }
-    const data = await this.remote.downloadBlob(id);
+    const data = await this.remote.downloadBlob(id, projectId);
     if (!data) { await this.setMissing(id, projectId); return; }
     await this.db.blobs.put({ id, projectId, data });
     await this.db.sync.put({ key: key(BLOB, id), kind: BLOB, id, projectId, hash: 'stored' });
@@ -319,7 +330,7 @@ export class SyncEngine {
       for (let id = work.shift(); id; id = work.shift()) {
         const b = await this.db.blobs.get(id);
         if (!b) continue;
-        await this.remote.uploadBlob(id, b.data);
+        await this.remote.uploadBlob(id, b.projectId, b.data);
         await this.db.sync.put({ key: key(BLOB, id), kind: BLOB, id, projectId: b.projectId, hash: 'stored' });
         this.tick();
       }
@@ -341,7 +352,7 @@ export class SyncEngine {
       this.tick(chunk.length);
     }
     if (goneBlobs.length) {
-      await this.remote.deleteBlobs(goneBlobs.map((s) => s.id));
+      await this.remote.deleteBlobs(goneBlobs.map((s) => ({ id: s.id, projectId: s.projectId })));
       await this.db.sync.bulkDelete(goneBlobs.map((s) => s.key));
     }
     this.pending = 0;

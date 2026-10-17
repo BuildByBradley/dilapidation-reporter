@@ -76,6 +76,22 @@ export async function deleteProject(id: string): Promise<void> {
   }));
 }
 
+/**
+ * Remove a project from this device only — nothing is deleted in the cloud (used when leaving a shared project).
+ * Its sync bookkeeping goes in the same transaction, so the sync engine does not mistake this for a deletion.
+ */
+export async function removeProjectLocally(id: string): Promise<void> {
+  return tracked(() => db.transaction('rw', [db.projects, db.floors, db.findings, db.categories, db.photos, db.assets, db.blobs, db.sync], async () => {
+    await db.sync.filter((s) => s.projectId === id).delete();
+    await Promise.all([
+      db.floors.where('projectId').equals(id).delete(), db.findings.where('projectId').equals(id).delete(),
+      db.categories.where('projectId').equals(id).delete(), db.photos.where('projectId').equals(id).delete(),
+      db.assets.where('projectId').equals(id).delete(), db.blobs.where('projectId').equals(id).delete(),
+    ]);
+    await db.projects.delete(id);
+  }));
+}
+
 // ---------- bundles (duplicate / backup / restore) ----------
 export async function loadBundle(projectId: string): Promise<ProjectBundle> {
   const project = await db.projects.get(projectId);

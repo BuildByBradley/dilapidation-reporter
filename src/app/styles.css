@@ -337,3 +337,25 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; margin: 0; f
 .viewer-note { position: absolute; left: 12px; right: 12px; bottom: 82px; z-index: 4; background: #fff4d6; border: 1px solid var(--warn-line); border-radius: var(--radius); padding: 6px 10px; font-size: .82rem; }
 .compact .viewer-note { bottom: calc(110px + env(safe-area-inset-bottom, 0px)); }
 .update-banner { position: fixed; left: 50%; top: calc(8px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 200; background: #15202b; color: #fff; border-radius: 12px; padding: 6px 8px 6px 14px; display: flex; gap: 10px; align-items: center; box-shadow: 0 4px 16px rgba(0,0,0,.3); font-size: .9rem; max-width: calc(100vw - 24px); flex-wrap: wrap; } .update-banner .link { color: #cfe0ff; }
+/* sharing */
+.member-list { list-style: none; padding: 0; margin: 4px 0 12px; display: grid; gap: 6px; }
+.member-list li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 10px; }
+.member-list .who { flex: 1; min-width: 160px; overflow-wrap: anywhere; }
+.member-list select { width: auto; }
+.invite-link { display: flex; gap: 6px; margin: 6px 0 12px; } .invite-link input { flex: 1; font-size: .85rem; }
+.tag.shared { background: #e6f4ea; color: var(--ok); }
+/* help */
+.help-btn { min-width: 40px; min-height: 40px; padding: 0; border-radius: 50%; font-weight: 800; font-size: 1.05rem; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 10px; flex-wrap: wrap; }
+.tabs button { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: none; font-weight: 600; color: var(--muted); }
+.tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+.help-guide details { border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 10px; margin: 6px 0; }
+.help-guide summary { font-weight: 700; cursor: pointer; min-height: 32px; display: list-item; }
+.help-guide p, .help-ask .bubble p { margin: 6px 0; } .help-guide li.sub, .bubble li.sub { margin-left: 18px; list-style: circle; }
+.help-guide input[type=search] { margin-bottom: 6px; }
+.help-ask .chat { display: grid; gap: 8px; max-height: 50dvh; overflow: auto; margin: 6px 0; }
+.bubble { padding: 8px 12px; border-radius: 12px; max-width: 92%; overflow-wrap: anywhere; }
+.bubble.user { justify-self: end; background: #e3edfb; } .bubble.assistant { justify-self: start; background: #f2f4f7; border: 1px solid var(--line); }
+.bubble ul, .bubble ol { margin: 4px 0; padding-left: 20px; }
+.ask-form { display: flex; gap: 6px; align-items: flex-end; } .ask-form textarea { flex: 1; }
+.chip { min-height: 32px; border-radius: 99px; font-size: .82rem; padding: 0 10px; }

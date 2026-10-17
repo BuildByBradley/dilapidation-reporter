@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { go } from '../../app/App';
 import { SaveIndicator } from '../../components/SaveIndicator';
 import { CloudStatus } from '../../components/Cloud';
+import { HelpButton } from '../../components/Help';
+import { useProjectRole } from '../../sync/cloud';
+import { ShareDialog } from '../projects/ShareDialog';
 import { Confirm, Dialog, useToast } from '../../components/ui';
 import { db } from '../../data/db';
 import { flushAll } from '../../data/flush';
@@ -57,6 +60,7 @@ export function Workspace({ projectId }: { projectId: string }) {
   const [importFor, setImportFor] = useState<string | null>(null);
   const [showCats, setShowCats] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const [showShare, setShowShare] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -68,7 +72,9 @@ export function Workspace({ projectId }: { projectId: string }) {
   const lockRef = useRef<LockHandle | null>(null);
   const lastCategory = useRef('');
 
-  const readOnly = lock === 'readonly';
+  const role = useProjectRole(projectId);
+  const viewOnly = role === 'viewer';
+  const readOnly = lock === 'readonly' || viewOnly;
   useEffect(() => {
     // Retry briefly: React StrictMode (dev) mounts, unmounts and remounts, so the first claim may still be
     // releasing when the second asks. A genuinely different tab keeps the lock and stays denied.
@@ -209,12 +215,14 @@ export function Workspace({ projectId }: { projectId: string }) {
       <SaveIndicator />
       <CloudStatus />
       <span className="spacer" />
+      <HelpButton />
       <button onClick={() => { setDrawer(null); toggle2D(); }} aria-pressed={viewer.kind === 'floor2d'}>{viewer.kind === 'floor2d' ? '3D view' : '2D view'}</button>
       <button className="primary" onClick={openReport}>Report</button>
       <div className="menu">
         <button aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>Project ▾</button>
         {menuOpen && (
           <div className="menu-list" role="menu" onClick={() => { setMenuOpen(false); setDrawer(null); }}>
+            <button role="menuitem" onClick={() => setShowShare(true)}>Share project…</button>
             <button role="menuitem" onClick={() => setShowDetails(true)}>Project details</button>
             <button role="menuitem" onClick={() => setShowCats(true)}>Categories</button>
             <button role="menuitem" onClick={backup}>Back up project</button>
@@ -226,7 +234,10 @@ export function Workspace({ projectId }: { projectId: string }) {
   );
   const banners = (
     <>
-      {readOnly && (
+      {viewOnly && (
+        <div className="banner" role="status" data-testid="viewonly-banner">This project is shared with you as a <strong>viewer</strong>: you can look around and print reports, but not change anything.</div>
+      )}
+      {readOnly && !viewOnly && (
         <div className="banner warn" role="alert" data-testid="readonly-banner">
           This project is open for editing in another tab or window, so this tab is <strong>read-only</strong> to avoid overwriting changes. <button onClick={retryLock}>Try again</button>
         </div>
@@ -260,6 +271,7 @@ export function Workspace({ projectId }: { projectId: string }) {
     <>
       {importFor && <ImportDialog floors={floors} startFloorId={importFor} findingCounts={counts} onClose={() => setImportFor(null)} />}
       {showCats && <CategoriesDialog projectId={projectId} onClose={() => setShowCats(false)} />}
+      {showShare && <ShareDialog projectId={projectId} projectName={project.name} onClose={() => setShowShare(false)} />}
       {showDetails && <ProjectDetails project={project} onClose={() => setShowDetails(false)} readOnly={readOnly} />}
       {discard && (
         <Confirm title="Discard the pin you are placing?" confirmLabel="Discard" danger onCancel={() => setDiscard(null)} onConfirm={() => { const d = discard; setDiscard(null); d(); }}>

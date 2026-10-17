@@ -30,11 +30,13 @@ describe.skipIf(!live)('live Supabase sync', () => {
     const pcSignIn = await pcClient.auth.signInWithPassword({ email, password });
     if (pcSignIn.error) throw pcSignIn.error;
     const uid = r.data.user!.id;
+    const sharing = !(await phoneClient.from('project_members').select('project_id').limit(1)).error; // same detection as the app
+    console.log(`sharing schema installed: ${sharing}`);
 
     const phoneDb = new InspectorDb(`live-phone-${Date.now()}`), pcDb = new InspectorDb(`live-pc-${Date.now()}`);
     const pcStatus: SyncStatus[] = [];
-    const phone = new SyncEngine(phoneDb, supabaseRemote(phoneClient, uid), 'live-phone', () => {}, () => true, 0);
-    const pc = new SyncEngine(pcDb, supabaseRemote(pcClient, uid), 'live-pc', (s) => pcStatus.push(s), () => true, 0);
+    const phone = new SyncEngine(phoneDb, supabaseRemote(phoneClient, uid, sharing), 'live-phone', () => {}, () => true, 0);
+    const pc = new SyncEngine(pcDb, supabaseRemote(pcClient, uid, sharing), 'live-pc', (s) => pcStatus.push(s), () => true, 0);
     await pc.start();
     await until(async () => pcStatus.some((s) => s.kind === 'synced' && s.live));
 

@@ -8,6 +8,8 @@ import { useLive } from '../../lib/useLive';
 import { loadSampleProject } from './sample';
 import { SaveIndicator } from '../../components/SaveIndicator';
 import { CloudPanel, CloudStatus } from '../../components/Cloud';
+import { HelpButton } from '../../components/Help';
+import { leaveProject, useProjectRole } from '../../sync/cloud';
 
 type Details = Required<Omit<repo.ProjectInput, 'summary'>>;
 const empty = (): Details => ({ name: '', siteName: '', address: '', client: '', inspector: '', inspectionDate: new Date().toISOString().slice(0, 10), reference: '', notes: '' });
@@ -52,6 +54,21 @@ function StoragePanel() {
   );
 }
 
+/** Shared-with-me badge (projects you own show no badge). */
+function SharedTag({ projectId }: { projectId: string }) {
+  const role = useProjectRole(projectId);
+  if (!role || role === 'owner') return null;
+  return <span className="tag shared" data-testid="shared-tag">Shared · {role === 'editor' ? 'Editor' : 'Viewer'}</span>;
+}
+/** Deleting a shared project would delete it for everyone: non-owners leave it instead. */
+function DeleteOrLeave({ project, onDelete, onLeave }: { project: repo.ProjectSummary; onDelete(): void; onLeave(): void }) {
+  const role = useProjectRole(project.id);
+  if (role && role !== 'owner') {
+    return <button className="danger" onClick={() => { if (window.confirm(`Leave “${project.name}”? It is removed from your devices; the owner and other members keep it.`)) onLeave(); }}>Leave</button>;
+  }
+  return <button className="danger" onClick={onDelete}>Delete</button>;
+}
+
 export function ProjectHome() {
   const toast = useToast();
   const [projects] = useLive(() => repo.listProjects(), [], [] as repo.ProjectSummary[]);
@@ -74,6 +91,7 @@ export function ProjectHome() {
         <span className="spacer" />
         <SaveIndicator />
         <CloudStatus />
+        <HelpButton />
       </header>
       <main className="content">
         <CloudPanel />
@@ -104,16 +122,16 @@ export function ProjectHome() {
             {projects.map((p) => (
               <li key={p.id} className="card" data-testid="project-card">
                 <div className="card-main">
-                  <h2><a href={`#/p/${p.id}`}>{p.name}</a>{p.isSample && <span className="tag">Sample</span>}</h2>
+                  <h2><a href={`#/p/${p.id}`}>{p.name}</a>{p.isSample && <span className="tag">Sample</span>}<SharedTag projectId={p.id} /></h2>
                   <p className="muted">{[p.siteName, p.address].filter(Boolean).join(' · ') || 'No site details'}</p>
-                  <p className="muted small">{p.floorCount} of 5 floors imported · {p.findingCount} finding{p.findingCount === 1 ? '' : 's'} · saved {fmtTime(p.updatedAt)}</p>
+                  <p className="muted small">{p.floorCount} floor plan{p.floorCount === 1 ? '' : 's'} imported · {p.findingCount} finding{p.findingCount === 1 ? '' : 's'} · saved {fmtTime(p.updatedAt)}</p>
                 </div>
                 <div className="card-actions">
                   <button className="primary" onClick={() => go(`/p/${p.id}`)}>Open</button>
                   <button onClick={() => setEditing(p)}>Rename / details</button>
                   <button onClick={() => run('Duplicating…', async () => { await repo.duplicateProject(p.id); toast('ok', 'Project duplicated'); })}>Duplicate</button>
                   <button onClick={() => run('Creating backup…', async () => { downloadBlob(new Blob([new Uint8Array(await createBackup(await repo.loadBundle(p.id)))], { type: 'application/zip' }), `${p.name.replace(/[^\w.-]+/g, '_')}-backup.zip`); })}>Back up</button>
-                  <button className="danger" onClick={() => setDeleting(p)}>Delete</button>
+                  <DeleteOrLeave project={p} onDelete={() => setDeleting(p)} onLeave={() => run('Leaving…', async () => { await leaveProject(p.id); toast('ok', `You left “${p.name}”`); })} />
                 </div>
               </li>
             ))}
