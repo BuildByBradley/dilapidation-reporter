@@ -102,8 +102,9 @@ drop policy if exists "own records" on public.records;
 drop policy if exists "members read" on public.records;
 drop policy if exists "members insert" on public.records;
 drop policy if exists "members update" on public.records;
+-- (an unclaimed project's first row must be readable by its uploader: "insert or update" uploads check read access too)
 create policy "members read" on public.records for select to authenticated
-  using (public.can_read(project_id));
+  using (public.can_read(project_id) or (kind = 'projects' and id = project_id and public.is_unclaimed(project_id)));
 create policy "members insert" on public.records for insert to authenticated
   with check (public.can_write(project_id) or (kind = 'projects' and id = project_id and public.is_unclaimed(project_id)));
 create policy "members update" on public.records for update to authenticated
@@ -156,7 +157,7 @@ drop policy if exists "project blobs insert" on storage.objects;
 drop policy if exists "project blobs update" on storage.objects;
 drop policy if exists "project blobs delete" on storage.objects;
 create policy "project blobs read" on storage.objects for select to authenticated
-  using (bucket_id = 'blobs' and public.can_read((storage.foldername(name))[1]));
+  using (bucket_id = 'blobs' and (public.can_read((storage.foldername(name))[1]) or owner_id = (select auth.uid())::text));
 create policy "project blobs insert" on storage.objects for insert to authenticated
   with check (bucket_id = 'blobs' and (public.can_write((storage.foldername(name))[1]) or public.is_unclaimed((storage.foldername(name))[1])));
 create policy "project blobs update" on storage.objects for update to authenticated
