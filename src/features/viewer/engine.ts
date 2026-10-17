@@ -59,7 +59,7 @@ export class ViewerEngine {
 
   constructor(private events: EngineEvents) {
     this.gestures = new GestureTracker({
-      rotate: (d) => this.mutate((c) => rotateYaw(c, d)),
+      rotate: (d) => this.mutate((c) => this.rotateAboutPivot(c, d)),
       pan: (dx, dy) => this.mutate((c) => panBy(c, dx, dy)),
       zoom: (f, x, y) => this.mutate((c) => zoomAbout(c, f, this.fitZoom(), x, y, this.w / 2, this.h / 2)),
       tap: (x, y) => this.handleTap(x, y),
@@ -103,7 +103,7 @@ export class ViewerEngine {
       if (!a) return;
       e.preventDefault();
       this.tween = null;
-      if (a.type === 'rotate') this.mutate((c) => rotateYaw(c, a.deg));
+      if (a.type === 'rotate') this.mutate((c) => this.rotateAboutPivot(c, a.deg));
       else if (a.type === 'pan') this.mutate((c) => panBy(c, a.dx, a.dy));
       else if (a.type === 'zoom') this.mutate((c) => zoomAbout(c, a.factor, this.fitZoom(), this.w / 2, this.h / 2, this.w / 2, this.h / 2));
       else if (a.type === 'fit') this.fit();
@@ -276,6 +276,28 @@ export class ViewerEngine {
   }
 
   // ---------- projection helpers ----------
+  /**
+   * The point rotation turns around in a single-floor 3D view: the pin being placed, else the selected pin on that
+   * floor. Null (turn around the screen centre) in the building overview, in 2D, or with no pin.
+   */
+  private pivot(): { floorId: string; u: number; v: number } | null {
+    const m = this.mode;
+    if (m.kind !== 'isolated3d') return null;
+    if (this.draft && this.draft.floorId === m.floorId) return this.draft;
+    const sel = this.selectedPin ? this.pins.find((p) => p.id === this.selectedPin && p.floorId === m.floorId) : undefined;
+    return sel ?? null;
+  }
+  /** Rotate the view, keeping the pivot pin fixed on screen (so the spot being worked on stays in view). */
+  private rotateAboutPivot(c: Camera, deg: number): Camera {
+    const next = rotateYaw(c, deg);
+    const p = this.pivot();
+    const f = p && this.floors.find((x) => x.id === p.floorId);
+    if (!p || !f?.image) return next;
+    const s = this.size(f), y = this.elevationOf(f.id), cx = this.w / 2, cy = this.h / 2;
+    const before = uvToScreen(c, p.u, p.v, s.W, s.H, y, cx, cy), after = uvToScreen(next, p.u, p.v, s.W, s.H, y, cx, cy);
+    return { ...next, panX: next.panX + before.x - after.x, panY: next.panY + before.y - after.y };
+  }
+
   uvToScreen(floorId: string, u: number, v: number) {
     const f = this.floors.find((x) => x.id === floorId);
     if (!f?.image) return null;

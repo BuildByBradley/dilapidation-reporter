@@ -334,3 +334,19 @@ test('A23 pins stay aligned after resize and device-pixel-ratio changes', async 
     await ctx.close();
   }
 });
+
+test('3D rotation turns around the pin being placed (it stays on the same spot on screen)', async ({ page }) => {
+  await openSample(page);
+  await isolate(page, 'Level 1');
+  await page.getByRole('button', { name: 'Add pin' }).first().click();
+  const fid = (await state(page)).floorId!;
+  const p = await screenOf(page, fid, 0.3, 0.7);
+  await tap(page, p.x, p.y);
+  await expect(page.getByTestId('placement-panel')).toBeVisible();
+  const yaw0 = (await state(page)).camera.yaw;
+  const box = (await canvas(page).boundingBox())!;
+  await drag(page, [box.width / 2, box.height / 2], [box.width / 2 + 160, box.height / 2], { pointerType: 'mouse', steps: 8 });
+  expect(Math.abs((await state(page)).camera.yaw - yaw0)).toBeGreaterThan(10);
+  const q = await screenOf(page, fid, 0.3, 0.7);
+  expect(Math.hypot(q.x - p.x, q.y - p.y)).toBeLessThan(1.5);
+});

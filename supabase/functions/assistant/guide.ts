@@ -27,11 +27,12 @@ Dilapidation Inspector records building-condition ("dilapidation") inspections o
 ## Moving around the plans
 - The overview shows all floors stacked in 3D. Tap a floor (or pick it in Floors) to isolate it; "Return to building" goes back. "2D view" shows the floor flat from above.
 - Phone/tablet: one finger sideways rotates (3D) or pans (2D); two fingers pan and pinch to zoom. The viewing angle is locked, so the plan never tips over.
+- In a single-floor 3D view, rotating turns around the pin you are placing (or the selected pin), so that spot stays in view; otherwise it turns around the centre of the screen.
 - Computer: drag rotates (3D) or pans (2D), Shift-drag pans, mouse wheel zooms; keys ←/→ rotate, +/− zoom, F fits.
 - On a phone the plan fills the screen: Floors tab on the left, Findings on the right, the project menu at the top, tools at the bottom.
 
 ## Adding a finding (pin)
-1. Isolate a floor, tap Add pin, then tap the plan where the defect is.
+1. Isolate a floor, tap Add pin, then tap the plan where the defect is. The zoomed view in step 1 has Wider / Normal / Closer / Closest buttons.
 2. On a phone a full-screen panel opens in three steps — the keyboard does not pop up first:
    - Step 1 Position: a zoomed view and an arrow pad move the pin one plan pixel at a time ("Bigger steps" moves 10). "Show plan to re-tap" hides the panel so you can tap a new spot.
    - Step 2 Details: title (required), category (required), severity, description, location notes.
