@@ -22,12 +22,21 @@ export type ViewerPaneProps = {
   onNotice(text: string): void;
   /** Optional second magnifier (the phone placement sheet), drawn with a wider crop for context. */
   sheetMagnifier?: HTMLCanvasElement | null;
+  /** Crop of the panel magnifier, in plan pixels. */
+  magCrop?: number;
 };
 
 export function ViewerPane(p: ViewerPaneProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const magRef = useRef<HTMLCanvasElement>(null);
+  const drawMags = () => {
+    const d = cbs.current.draft;
+    if (!d) return;
+    if (magRef.current) engine.drawMagnifier(magRef.current, d.floorId, d.u, d.v);
+    const sm = cbs.current.sheetMagnifier;
+    if (sm) engine.drawMagnifier(sm, d.floorId, d.u, d.v, cbs.current.magCrop ?? 120);
+  };
   const cbs = useRef(p);
   cbs.current = p;
   const [chooser, setChooser] = useState<{ ids: string[]; x: number; y: number } | null>(null);
@@ -92,9 +101,10 @@ export function ViewerPane(p: ViewerPaneProps) {
   const modeKey = p.mode.kind + ('floorId' in p.mode ? p.mode.floorId : '');
   useEffect(() => { engine.setMode(p.mode); setChooser(null); }, [engine, modeKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (p.draft && magRef.current) engine.drawMagnifier(magRef.current, p.draft.floorId, p.draft.u, p.draft.v);
-    if (p.draft && p.sheetMagnifier) engine.drawMagnifier(p.sheetMagnifier, p.draft.floorId, p.draft.u, p.draft.v, 120);
-  }, [engine, p.draft, viewFloors, p.sheetMagnifier]);
+    drawMags();
+  }, [engine, p.draft, viewFloors, p.sheetMagnifier, p.magCrop]); // eslint-disable-line react-hooks/exhaustive-deps
+  // redraw when the sharp PDF tile arrives or the view changes, so the magnifier shows the sharpest source
+  useEffect(() => engine.onView(() => drawMags()), [engine]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const modeFloorId = 'floorId' in p.mode ? p.mode.floorId : undefined;
   const floorName = modeFloorId ? p.floors.find((f) => f.id === modeFloorId)?.name : undefined;
@@ -141,7 +151,7 @@ export function ViewerPane(p: ViewerPaneProps) {
         )}
       </div>
 
-      {p.draft && (
+      {p.draft && !p.sheetMagnifier && (
         <div className="magnifier" aria-label="Magnified view of the proposed pin location">
           <canvas ref={magRef} width={140} height={140} />
           <span className="small">Target (4× zoom)</span>

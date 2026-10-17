@@ -127,3 +127,14 @@ test('phone: fitted floor is not hidden behind the edge tabs or toolbar', async 
   expect(b.bounds.minY).toBeGreaterThanOrEqual(44);
   expect(b.bounds.maxY).toBeLessThanOrEqual(b.size.h - 70);
 });
+
+test.describe('phone held sideways', () => {
+  test.use({ viewport: { width: 800, height: 370 } });
+  test('a short, wide screen gets the phone layout (plan full screen, edge tabs)', async ({ page }) => {
+    await openSampleOnPhone(page);
+    await expect(page.getByTestId('workspace-compact')).toBeVisible();
+    const box = (await page.getByTestId('viewer').boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(799);
+    await expect(page.locator('.tab-left')).toBeVisible();
+  });
+});

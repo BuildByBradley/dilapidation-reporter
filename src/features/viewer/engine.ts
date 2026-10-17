@@ -482,10 +482,10 @@ export class ViewerEngine {
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(img, cx - half, cy - half, cropPx, cropPx, 0, 0, target.width, target.height);
     }
-    const c = target.width / 2;
-    ctx.lineWidth = 1; ctx.strokeStyle = '#d6246e';
+    const c = target.width / 2, k = Math.max(1, target.width / 220); // keep the crosshair the same visual weight on big magnifiers
+    ctx.lineWidth = k; ctx.strokeStyle = '#d6246e';
     ctx.beginPath(); ctx.moveTo(c, 0); ctx.lineTo(c, target.height); ctx.moveTo(0, c); ctx.lineTo(target.width, c); ctx.stroke();
-    ctx.beginPath(); ctx.arc(c, c, 10, 0, 7); ctx.stroke();
+    ctx.beginPath(); ctx.arc(c, c, 10 * k, 0, 7); ctx.stroke();
   }
 
   /** Test/diagnostic: screen-space bounds of the plane for a floor. */

@@ -34,7 +34,7 @@ const appUrl = () => location.origin + location.pathname;
  */
 export type SyncMode = 'auto' | 'manual';
 const MODE_KEY = 'di-sync-mode';
-const defaultMode = (): SyncMode => (typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse) and (max-width: 900px)').matches ? 'manual' : 'auto');
+const defaultMode = (): SyncMode => (typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse) and ((max-width: 900px) or (max-height: 560px))').matches ? 'manual' : 'auto');
 let mode: SyncMode = (() => { try { const v = localStorage.getItem(MODE_KEY); return v === 'auto' || v === 'manual' ? v : defaultMode(); } catch { return defaultMode(); } })();
 const modeListeners = new Set<() => void>();
 export const useSyncMode = () => useSyncExternalStore((l) => { modeListeners.add(l); return () => { modeListeners.delete(l); }; }, () => mode);

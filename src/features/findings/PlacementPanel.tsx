@@ -18,11 +18,13 @@ export const emptyForm = (categoryId = ''): NewFindingForm => ({ title: '', cate
  * On a phone it fills the screen (`compact`); "Show plan" collapses it so the plan can be tapped again.
  */
 export function PlacementPanel({ mode, reference, floorName, u, v, assetWidth, assetHeight, categories, form, setForm, onNudge, onConfirm, onCancel, busy,
-  compact = false, magnifierRef, onShowPlan, pendingPhotos, setPendingPhotos }: {
+  compact = false, magnifierRef, onShowPlan, pendingPhotos, setPendingPhotos, magCrop = 120, setMagCrop }: {
   mode: 'new' | 'relocate'; reference?: string; floorName: string; u: number; v: number; assetWidth: number; assetHeight: number;
   categories: Category[]; form: NewFindingForm; setForm(f: NewFindingForm): void;
   onNudge(dxPx: number, dyPx: number): void; onConfirm(): void; onCancel(): void; busy: boolean;
   compact?: boolean; magnifierRef?: Ref<HTMLCanvasElement>; onShowPlan?(): void;
+  /** Magnifier crop in plan pixels (smaller = closer) and its setter. */
+  magCrop?: number; setMagCrop?(n: number): void;
   pendingPhotos: ProcessedImage[]; setPendingPhotos(p: ProcessedImage[]): void;
 }) {
   const [big, setBig] = useState(false);
@@ -49,9 +51,16 @@ export function PlacementPanel({ mode, reference, floorName, u, v, assetWidth, a
       <div className="place-step" aria-label="Position">
         <h3>{stepNo(1)}Position the pin</h3>
         <div className="position-row">
-          {compact && magnifierRef && (
+          {magnifierRef && (
             <div className="sheet-magnifier">
-              <canvas ref={magnifierRef} width={220} height={220} aria-label="Magnified view of the pin location" />
+              <canvas ref={magnifierRef} width={480} height={480} aria-label="Magnified view of the pin location" data-testid="panel-magnifier" />
+              {setMagCrop && (
+                <div className="mag-zoom" role="group" aria-label="Magnifier zoom">
+                  {[[240, 'Wider'], [120, 'Normal'], [60, 'Closer'], [30, 'Closest']].map(([c, label]) => (
+                    <button key={c} type="button" aria-pressed={magCrop === c} onClick={() => setMagCrop(c as number)}>{label}</button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           <div className="dpad" role="group" aria-label="Fine adjust pin position">

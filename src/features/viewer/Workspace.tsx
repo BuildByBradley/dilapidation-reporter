@@ -29,7 +29,8 @@ type LockState = 'pending' | 'held' | 'readonly';
 type Drawer = null | 'top' | 'left' | 'right';
 
 /** Phone / small-tablet layout: the plan fills the screen and everything else lives behind edge tabs. */
-const COMPACT_QUERY = '(max-width: 900px)';
+/** Phone layout: narrow screens, and short ones (a phone held sideways is wide but only ~370-450 px tall). */
+const COMPACT_QUERY = '(max-width: 900px), (max-height: 560px)';
 function useCompact() {
   const [c, setC] = useState(() => typeof window !== 'undefined' && window.matchMedia(COMPACT_QUERY).matches);
   useEffect(() => {
@@ -57,6 +58,7 @@ export function Workspace({ projectId }: { projectId: string }) {
   const [form, setForm] = useState<NewFindingForm>(emptyForm());
   const [pendingPhotos, setPendingPhotos] = useState<repo.ProcessedImage[]>([]);
   const [sheetMag, setSheetMag] = useState<HTMLCanvasElement | null>(null);
+  const [magCrop, setMagCrop] = useState(120);
   const [importFor, setImportFor] = useState<string | null>(null);
   const [showCats, setShowCats] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
@@ -205,7 +207,7 @@ export function Workspace({ projectId }: { projectId: string }) {
     <ViewerPane
       floors={floors} findings={findings} categories={categories} mode={viewer} interaction={interaction} selectedId={selectedId} draft={draft} readOnly={readOnly} compact={compact}
       onFloorPick={selectFloor} onSelect={selectFinding} onPlace={onPlace} onEscape={onEscape} onReturn={toOverview} onToggle2D={toggle2D} onTogglePlace={togglePlace}
-      onNotice={(t) => toast('info', t)} sheetMagnifier={compact ? sheetMag : null}
+      onNotice={(t) => toast('info', t)} sheetMagnifier={sheetMag} magCrop={magCrop}
     />
   );
   const headerContent = (
@@ -252,7 +254,7 @@ export function Workspace({ projectId }: { projectId: string }) {
         mode={interaction.kind === 'relocatePin' ? 'relocate' : 'new'} reference={relocFinding?.reference} floorName={placementFloor.name}
         u={draft.u} v={draft.v} assetWidth={draftAsset.width} assetHeight={draftAsset.height} categories={categories} form={form} setForm={setForm}
         onNudge={nudge} onConfirm={confirmPlacement} onCancel={() => guardDiscard(cancelPlacement)} busy={saving}
-        compact={compact} magnifierRef={setSheetMag} onShowPlan={() => setSheetOpen(false)} pendingPhotos={pendingPhotos} setPendingPhotos={setPendingPhotos}
+        compact={compact} magnifierRef={setSheetMag} magCrop={magCrop} setMagCrop={setMagCrop} onShowPlan={() => setSheetOpen(false)} pendingPhotos={pendingPhotos} setPendingPhotos={setPendingPhotos}
       />
     ) : placing ? (
       <section className="editor"><h2>{interaction.kind === 'relocatePin' ? 'Relocate pin' : 'Add pin'}</h2><p>Tap the plan where the condition is. A target and magnifier will appear so you can fine-tune before saving.</p>
