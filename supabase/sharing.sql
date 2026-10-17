@@ -5,9 +5,34 @@
 -- People join through invite links (a secret token sent by the owner), not by email address — email addresses are not
 -- verified on this project, so they cannot prove who someone is.
 
+-- 0. If the same project was uploaded from two accounts (e.g. signed in with different emails on phone and PC),
+--    everyone keeps access — the account that worked on it last becomes owner, the others editors — and only the
+--    newest copy of each record is kept.
+alter table public.records replica identity full; -- lets duplicate rows be removed while the table broadcasts live changes
+create table if not exists public.project_members (
+  project_id text not null,
+  user_id    uuid not null references auth.users (id) on delete cascade,
+  role       text not null check (role in ('owner', 'editor', 'viewer')),
+  email      text,
+  added_at   timestamptz not null default now(),
+  primary key (project_id, user_id)
+);
+insert into public.project_members (project_id, user_id, role, email)
+select x.project_id, x.owner, case when x.rn = 1 then 'owner' else 'editor' end, u.email
+from (
+  select project_id, owner, row_number() over (partition by project_id order by max(updated_at) desc, owner) as rn
+  from public.records group by project_id, owner
+) x
+join auth.users u on u.id = x.owner
+on conflict do nothing;
+delete from public.records r using public.records newer
+where r.kind = newer.kind and r.id = newer.id and r.owner <> newer.owner
+  and (newer.updated_at > r.updated_at or (newer.updated_at = r.updated_at and newer.owner > r.owner));
+
 -- 1. One row per record for everyone in the project (owner column now means "last written by").
 alter table public.records drop constraint if exists records_pkey;
 alter table public.records add primary key (kind, id);
+alter table public.records replica identity default;
 create index if not exists records_project on public.records (project_id);
 create index if not exists records_updated on public.records (updated_at);
 
