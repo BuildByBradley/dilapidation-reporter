@@ -128,6 +128,34 @@ test('phone: fitted floor is not hidden behind the edge tabs or toolbar', async 
   expect(b.bounds.maxY).toBeLessThanOrEqual(b.size.h - 70);
 });
 
+test('phone: the bottom tool bar fits the screen width; the camera Capture button is on screen above it', async ({ page }) => {
+  await openSampleOnPhone(page);
+  const bar = page.getByRole('toolbar', { name: 'Viewer tools' });
+  expect(await bar.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  for (const name of ['Navigate', 'Add pin', 'Zoom in', 'Zoom out', 'Fit view', 'Return to building', '2D view']) await expect(bar.getByRole('button', { name })).toBeVisible();
+  await bar.screenshot({ path: 'test-results/phone-toolbar.png' });
+  // open the camera from the new-pin sheet
+  await page.locator('.tab-left').tap();
+  await page.getByRole('button', { name: /^Level 1,/ }).tap();
+  await page.waitForFunction(() => (window as any).__inspector.engine.debugState().visible.length === 1);
+  await settle(page);
+  await bar.getByRole('button', { name: 'Add pin' }).tap();
+  const fid = (await state(page)).floorId!;
+  const pt = await page.evaluate((id) => (window as any).__inspector.engine.uvToScreen(id, 0.5, 0.5), fid);
+  const box = (await page.getByTestId('viewer-canvas').boundingBox())!;
+  await page.touchscreen.tap(box.x + pt.x, box.y + pt.y);
+  await page.getByTestId('placement-panel').getByRole('button', { name: 'Take photo' }).tap();
+  const capture = page.getByRole('button', { name: 'Capture' });
+  await expect(capture).toBeVisible();
+  const cb = (await capture.boundingBox())!, vp = page.viewportSize()!;
+  expect(cb.y + cb.height).toBeLessThanOrEqual(vp.height);
+  // nothing covers it: the element at its centre is the button itself
+  expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.textContent, { x: cb.x + cb.width / 2, y: cb.y + cb.height / 2 })).toBe('Capture');
+  await page.screenshot({ path: 'test-results/phone-camera.png' });
+  await capture.tap();
+  await expect(page.getByRole('button', { name: 'Use photo' })).toBeVisible();
+});
+
 test.describe('phone held sideways', () => {
   test.use({ viewport: { width: 800, height: 370 } });
   test('a short, wide screen gets the phone layout (plan full screen, edge tabs)', async ({ page }) => {

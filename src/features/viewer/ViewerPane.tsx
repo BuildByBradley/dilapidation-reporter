@@ -131,13 +131,14 @@ export function ViewerPane(p: ViewerPaneProps) {
       {placing && <div className="viewer-banner" role="status">{p.interaction.kind === 'relocatePin' ? 'Relocating pin' : 'Add pin'}: tap the plan to propose a location, adjust, then confirm. Press Esc to cancel.</div>}
 
       <div className="viewer-tools" role="toolbar" aria-label="Viewer tools">
-        <button aria-pressed={!placing} onClick={() => placing && p.onTogglePlace()} title="Navigate">Navigate</button>
-        <button aria-pressed={placing} disabled={overview || p.readOnly} onClick={p.onTogglePlace} title={overview ? 'Select a floor first' : 'Add a condition pin'}>Add pin</button>
+        {/* phones show the short labels so the whole bar fits the screen width; names stay the full words */}
+        <button aria-label="Navigate" aria-pressed={!placing} onClick={() => placing && p.onTogglePlace()} title="Navigate"><span className="lbl-full">Navigate</span><span className="lbl-short">Move</span></button>
+        <button aria-label="Add pin" aria-pressed={placing} disabled={overview || p.readOnly} onClick={p.onTogglePlace} title={overview ? 'Select a floor first' : 'Add a condition pin'}><span className="lbl-full">Add pin</span><span className="lbl-short">Pin</span></button>
         <button aria-label="Zoom in" onClick={() => engine.zoomBy(1.3)}>+</button>
         <button aria-label="Zoom out" onClick={() => engine.zoomBy(1 / 1.3)}>−</button>
-        <button onClick={() => engine.fit()}>Fit view</button>
-        <button onClick={p.onReturn} disabled={overview}>Return to building</button>
-        <button onClick={p.onToggle2D} aria-pressed={is2d} title="Switch between 2D plan and 3D view">{is2d ? 'Show 3D' : '2D view'}</button>
+        <button aria-label="Fit view" onClick={() => engine.fit()}><span className="lbl-full">Fit view</span><span className="lbl-short">Fit</span></button>
+        <button aria-label="Return to building" onClick={p.onReturn} disabled={overview}><span className="lbl-full">Return to building</span><span className="lbl-short">Building</span></button>
+        <button aria-label={is2d ? 'Show 3D' : '2D view'} onClick={p.onToggle2D} aria-pressed={is2d} title="Switch between 2D plan and 3D view"><span className="lbl-full">{is2d ? 'Show 3D' : '2D view'}</span><span className="lbl-short">{is2d ? '3D' : '2D'}</span></button>
       </div>
 
       <div className="gesture-help" data-testid="gesture-help">

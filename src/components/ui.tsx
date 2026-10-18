@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 type Toast = { id: number; kind: 'info' | 'error' | 'ok'; text: string };
 const ToastCtx = createContext<(kind: Toast['kind'], text: string) => void>(() => {});
@@ -43,14 +44,17 @@ export function Dialog({ title, onClose, children, wide, footer, dismissible = t
     document.addEventListener('keydown', key, true);
     return () => { document.removeEventListener('keydown', key, true); prev?.focus?.(); };
   }, [onClose, dismissible]);
-  return (
+  // Rendered at the top of the page: a dialog opened from inside a panel (e.g. the camera from the new-pin sheet)
+  // must not stay under the panel's layer or the plan's tool bar.
+  return createPortal(
     <div className="backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget && dismissible) onClose(); }}>
       <div className={`dialog${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label={title} ref={ref}>
         <header className="dialog-head"><h2>{title}</h2>{dismissible && <button className="icon-btn" aria-label="Close" onClick={onClose}>×</button>}</header>
         <div className="dialog-body">{children}</div>
         {footer && <footer className="dialog-foot">{footer}</footer>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

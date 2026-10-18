@@ -103,7 +103,7 @@ input[type='color'] { width: 48px; padding: 2px; }
 .photo-open { padding: 0; border: 0; background: none; min-height: 0; } .photo-thumb { width: 84px; height: 64px; object-fit: cover; border-radius: 4px; background: #e8ebf0; display: block; }
 .thumb.placeholder { background: #e8ebf0; }
 .photo-meta input { min-height: 36px; } .photo-meta .row button { min-height: 34px; padding: 0 8px; }
-.camera-video { width: 100%; max-height: 60vh; background: #000; border-radius: var(--radius); object-fit: contain; }
+.camera-video { width: 100%; max-height: 52dvh; background: #000; border-radius: var(--radius); object-fit: contain; }
 .lightbox-img { max-width: 100%; max-height: 70vh; display: block; margin: 0 auto; }
 .cat-list { list-style: none; padding: 0; margin: 0 0 10px; display: grid; gap: 6px; }
 .cat-list li { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; } .cat-list li input:not([type]), .cat-list li input[type='text'] { flex: 1; min-width: 150px; }
@@ -119,7 +119,7 @@ input[type='color'] { width: 48px; padding: 2px; }
 fieldset.warn { border: 1px solid var(--warn-line); background: var(--warn); border-radius: var(--radius); margin: 6px 0; } fieldset.warn label { display: flex; gap: 6px; align-items: center; color: var(--ink); font-weight: 400; }
 
 .backdrop { position: fixed; inset: 0; background: rgba(15,23,35,.5); display: grid; place-items: center; z-index: 100; padding: 12px; }
-.dialog { background: #fff; border-radius: 12px; width: min(560px, 100%); max-height: 92vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
+.dialog { background: #fff; border-radius: 12px; width: min(560px, 100%); max-height: calc(100dvh - 24px); display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
 .dialog.wide { width: min(860px, 100%); }
 .dialog-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); } .dialog-head h2 { margin: 0; }
 .dialog-body { padding: 14px 16px; overflow: auto; } .dialog-foot { padding: 10px 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
@@ -372,3 +372,12 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; margin: 0; f
   .placement-compact .sheet-magnifier { max-width: min(42vh, 260px); }
   .topbar { padding-top: 4px; padding-bottom: 4px; }
 }
+/* viewer tool bar labels: full words on wide screens, short ones in the phone bar (which then fits without scrolling) */
+.lbl-short { display: none; }
+.compact .viewer-tools { overflow-x: visible; gap: 4px; }
+.compact .viewer-tools button { flex: 1 1 0; min-width: 0; padding: 0 2px; font-size: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.compact .viewer-tools .lbl-full { display: none; } .compact .viewer-tools .lbl-short { display: inline; }
+.compact .viewer-tools button[aria-label="Zoom in"], .compact .viewer-tools button[aria-label="Zoom out"] { flex: 0 0 36px; font-size: 1rem; }
+@media (max-width: 400px) { .compact .viewer-tools button { font-size: .76rem; } }
+/* dialogs on phones: use the visible screen height; the footer (Capture / Use photo) always stays on screen */
+@media (max-width: 600px) { .backdrop { padding: 8px; } .dialog-body { padding: 10px 12px; } }
