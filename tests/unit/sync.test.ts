@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { InspectorDb, useDb as selectDb } from '../../src/data/db';
 import * as repo from '../../src/data/repo';
 import { resetSaveState } from '../../src/data/saveStatus';
-import { SyncEngine, hashRow, stableJson, type Kind, type RecordRow, type Remote, type RemoteRecord } from '../../src/sync/engine';
+import { SyncEngine, hashRow, stableJson, type Kind, type RecordRow, type Remote, type RemoteRecord, type SyncStatus } from '../../src/sync/engine';
 
 /** In-memory stand-in for Supabase: one records table, one file bucket, a live feed. */
 class FakeCloud {
@@ -11,12 +11,19 @@ class FakeCloud {
   subs = new Set<(r: RemoteRecord) => void>();
   clock = Date.parse('2026-10-15T10:00:00Z');
   online = true;
+  /** Simulated refusals: return an error message to refuse an upload. */
+  refuseBlob: (id: string) => string | null = () => null;
+  refuseRecord: (r: RecordRow) => string | null = () => null;
+  /** Simulated signal drops: the next N uploads fail with a network error. */
+  drops = 0;
   remote(): Remote {
     const self = this; // eslint-disable-line @typescript-eslint/no-this-alias
     const check = () => { if (!self.online) throw new Error('network down'); };
     return {
       async upsert(rows: RecordRow[]) {
         check();
+        if (self.drops > 0) { self.drops--; throw new TypeError('Load failed'); }
+        for (const r of rows) { const why = self.refuseRecord(r); if (why) throw new Error(why); }
         for (const r of rows) {
           const rec: RemoteRecord = { ...structuredClone(r), updated_at: new Date(++self.clock).toISOString() };
           self.records.set(`${r.kind}:${r.id}`, rec);
@@ -25,7 +32,12 @@ class FakeCloud {
       },
       async fetchSince(since) { check(); return [...self.records.values()].filter((r) => !since || r.updated_at > since).map((r) => structuredClone(r)); },
       async fetchOne(kind: Kind, id) { check(); const r = self.records.get(`${kind}:${id}`); return r ? structuredClone(r) : null; },
-      async uploadBlob(id, _p, b) { check(); self.files.set(id, b); },
+      async uploadBlob(id, _p, b) {
+        check();
+        if (self.drops > 0) { self.drops--; throw new TypeError('Load failed'); }
+        const why = self.refuseBlob(id); if (why) throw new Error(why);
+        self.files.set(id, b);
+      },
       async downloadBlob(id) { check(); return self.files.get(id) ?? null; },
       async deleteBlobs(items) { check(); items.forEach((x) => self.files.delete(x.id)); },
       subscribe(on, onLive) { self.subs.add(on); onLive(true); return () => self.subs.delete(on); },
@@ -225,4 +237,62 @@ describe('phone → PC live sync', () => {
     expect(await pc.db.photos.where('findingId').equals(f.id).count()).toBe(1);
     phone.engine.stop(); pc.engine.stop();
   });
+
+  it('one item that cannot upload does not hold back the rest; the reason is reported in plain words', async () => {
+    const statuses: SyncStatus[] = [];
+    const db = new InspectorDb(`sync-phone-${++n}`); dbs.push(db);
+    const phone = new SyncEngine(db, cloud.remote(), 'phone-x', (st) => statuses.push(st), () => cloud.online, 0);
+    const { good, bad, badPhotoAsset } = await on(db, async () => {
+      const p = await repo.createProject({ name: 'Site B' });
+      const [floor] = await repo.listFloors(p.id);
+      await repo.setFloorPlan(floor.id, img(5));
+      const cats = await repo.listCategories(p.id);
+      const good = await repo.createFinding({ floorId: floor.id, u: 0.2, v: 0.2, categoryId: cats[0].id, title: 'Good one' });
+      await repo.addPhoto(good.id, img(6));
+      const bad = await repo.createFinding({ floorId: floor.id, u: 0.4, v: 0.4, categoryId: cats[0].id, title: 'Unlucky one' });
+      const ph = await repo.addPhoto(bad.id, img(7));
+      return { good, bad, badPhotoAsset: (await db.assets.get(ph.assetId))! };
+    });
+    const badFile = badPhotoAsset.thumbnailBlobId;
+    cloud.refuseBlob = (id) => (id === badFile ? 'The operation couldn\u2019t be completed. (WebKitBlobResource error 1.)' : null);
+    await phone.start();
+
+    // Everything except the photo with the unreadable file went up.
+    expect(cloud.records.get(`findings:${good.id}`)).toBeTruthy();
+    expect(cloud.records.get(`findings:${bad.id}`)).toBeTruthy();
+    expect([...cloud.records.values()].filter((r) => r.kind === 'photos')).toHaveLength(1);
+    expect(cloud.records.has(`assets:${badPhotoAsset.id}`)).toBe(false);
+    const last = statuses.at(-1)!;
+    expect(last.kind).toBe('error');
+    if (last.kind === 'error') {
+      expect(last.problems?.[0]).toMatch(/could not be read by the browser/);
+      expect(last.pending).toBeGreaterThan(0);
+    }
+
+    // Next sync, once the file can be sent, finishes the job.
+    cloud.refuseBlob = () => null;
+    await phone.syncNow();
+    expect([...cloud.records.values()].filter((r) => r.kind === 'photos')).toHaveLength(2);
+    expect(statuses.at(-1)!.kind).toBe('synced');
+    phone.stop();
+  });
+
+  it('a refused project is reported as an access problem; a signal drop is retried without bothering the user', async () => {
+    const statuses: SyncStatus[] = [];
+    const db = new InspectorDb(`sync-phone-${++n}`); dbs.push(db);
+    const phone = new SyncEngine(db, cloud.remote(), 'phone-y', (st) => statuses.push(st), () => cloud.online, 0, false);
+    const p = await on(db, () => repo.createProject({ name: 'Not mine' }));
+    cloud.refuseRecord = (r) => (r.project_id === p.id ? 'new row violates row-level security policy for table "records"' : null);
+    await phone.start();
+    await phone.syncNow();
+    const st = statuses.at(-1)!;
+    expect(st.kind).toBe('error');
+    if (st.kind === 'error') expect(st.message).toMatch(/not allowed to change this project/);
+    cloud.refuseRecord = () => null;
+    cloud.drops = 1; // one dropped request: retried quietly
+    await phone.syncNow();
+    expect(statuses.at(-1)!.kind).toBe('manual');
+    expect(cloud.records.get(`projects:${p.id}`)).toBeTruthy();
+    phone.stop();
+  }, 15000);
 });

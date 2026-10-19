@@ -20,6 +20,8 @@ export type RecordRow = { kind: Kind; id: string; project_id: string; data: Reco
 export type RemoteRecord = RecordRow & { updated_at: string };
 
 export interface Remote {
+  /** Optional check before talking to the cloud (e.g. the sign-in is still valid). Throws with the reason. */
+  ready?(): Promise<void>;
   upsert(rows: RecordRow[]): Promise<void>;
   /** Every record changed after `since` (exclusive), oldest first. `null` means everything. */
   fetchSince(since: string | null): Promise<RemoteRecord[]>;
@@ -36,7 +38,8 @@ export type SyncStatus =
   | { kind: 'syncing'; pending: number }
   | { kind: 'synced'; at: string; live: boolean }
   | { kind: 'offline'; pending: number }
-  | { kind: 'error'; pending: number; message: string }
+  /** `problems`: what could not be uploaded and why (everything else was). */
+  | { kind: 'error'; pending: number; message: string; problems?: string[] }
   /** Manual mode: nothing is sent or received until the user syncs. */
   | { kind: 'manual'; pending: number; at?: string };
 
@@ -67,7 +70,47 @@ const MISSING = 'missingBlobs';
 const LAST_SYNC = 'lastSync';
 /** Re-read a little before the cursor: a transaction can commit after a later one started. Applying is idempotent. */
 const CURSOR_OVERLAP_MS = 2 * 60 * 1000;
+/**
+ * Plain-language reason for a failed cloud call. Kept short: it is shown on a phone.
+ */
+export function explainSyncError(e: unknown): string {
+  const m = e instanceof Error ? e.message : String(e);
+  if (isTransient(e)) return 'No connection to the cloud (weak or no signal). Try again when you have signal or Wi-Fi.';
+  if (/row-level security|violates.*policy|permission denied|not authori[sz]ed|unauthori[sz]ed|\b403\b/i.test(m)) return 'Your account is not allowed to change this project (it belongs to another account, or you only have viewer access).';
+  if (/jwt|token.*expired|refresh token|invalid claim|session/i.test(m)) return 'Your sign-in has expired. Sign out and sign in again on the projects page (nothing on this phone is lost).';
+  if (/exceeded the maximum|too large|payload|413/i.test(m)) return 'A file is too large for the cloud.';
+  if (/WebKitBlobResource|NotReadableError|could not be read|NotFoundError/i.test(m)) return 'A file stored on this device could not be read by the browser.';
+  if (/quota|storage.*limit|exceeded.*quota/i.test(m)) return 'The cloud storage is full.';
+  return m;
+}
+/** A network blip worth retrying (as opposed to a refusal that will fail again). */
+export function isTransient(e: unknown): boolean {
+  const m = e instanceof Error ? `${e.name} ${e.message}` : String(e);
+  return /failed to fetch|load failed|networkerror|network request failed|network down|fetch failed|timed? ?out|timeout|aborted|ECONNRESET|socket|\b50[234]\b|bad gateway|service unavailable|gateway timeout/i.test(m);
+}
+/** Run a cloud call, retrying network blips a couple of times (site signal comes and goes). */
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3, waitMs = 1500): Promise<T> {
+  for (let i = 1; ; i++) {
+    try { return await fn(); } catch (e) {
+      if (i >= attempts || !isTransient(e)) throw e;
+      await new Promise((r) => setTimeout(r, waitMs * i));
+    }
+  }
+}
+
+/** Some items could not be uploaded; everything else was. */
+export class SyncProblems extends Error {
+  constructor(readonly problems: string[]) {
+    super(problems.length === 1 ? problems[0] : `${problems.length} items could not be uploaded. ${problems[0]}`);
+  }
+}
+
 const assetBlobIds = (a: Asset) => [a.originalBlobId, a.displayBlobId, a.thumbnailBlobId, a.reportBlobId].filter((x): x is string => !!x);
+
+async function readBlob(b: Blob): Promise<Blob> {
+  if (typeof b.arrayBuffer !== 'function') return b;
+  return new Blob([await b.arrayBuffer()], { type: b.type });
+}
 
 export class SyncEngine {
   private queue: Promise<unknown> = Promise.resolve();
@@ -127,8 +170,10 @@ export class SyncEngine {
   async syncNow(): Promise<void> {
     if (this.stopped) return;
     this.report({ kind: 'syncing', pending: this.pending });
-    try { await this.pull(); } catch (e) { this.fail(e); return; }
+    let pullError: unknown;
+    try { await this.pull(); } catch (e) { pullError = e; } // still upload: getting site data off the phone matters most
     await this.push();
+    if (pullError && !this.running) this.fail(pullError);
   }
 
   stop(): void {
@@ -169,6 +214,7 @@ export class SyncEngine {
   async pull(): Promise<void> {
     const cursor = (await this.db.meta.get(CURSOR))?.value ?? null;
     const since = cursor ? new Date(Date.parse(cursor) - CURSOR_OVERLAP_MS).toISOString() : null;
+    await this.remote.ready?.();
     const rows = await this.remote.fetchSince(since);
     await this.enqueue(() => this.retryMissing());
     if (!rows.length) return;
@@ -323,6 +369,26 @@ export class SyncEngine {
     if (!this.pending || !upload) return;
     if (!this.isOnline()) { this.report({ kind: 'offline', pending: this.pending }); return; }
     this.report({ kind: 'syncing', pending: this.pending });
+    await this.remote.ready?.();
+
+    // Anything that fails is skipped together with what depends on it; the rest still goes up, and the
+    // failures are reported at the end (and retried on the next sync).
+    const problems = new Map<string, string>();
+    const blocked = new Set<string>(); // keys of items not uploaded this round
+    const blockedProjects = new Set<string>();
+    const describeItem = (kind: string, obj?: Record<string, unknown>) => {
+      if (kind === BLOB) return 'a plan or photo file';
+      if (kind === 'findings' && obj) return `finding ${String(obj.reference ?? '')} "${String(obj.title ?? '')}"`.replace(' ""', '');
+      if (kind === 'floors' && obj) return `floor "${String(obj.name ?? '')}"`;
+      if (kind === 'projects' && obj) return `project "${String(obj.name ?? '')}"`;
+      return { categories: 'a category', assets: 'a plan or photo', photos: 'a photo' }[kind] ?? kind;
+    };
+    const problem = (what: string, e: unknown) => {
+      console.error('sync: could not upload', what, e);
+      const why = explainSyncError(e);
+      const k = why + '|' + (what.startsWith('finding') || what.startsWith('floor') || what.startsWith('project') ? what : '');
+      if (!problems.has(k)) problems.set(k, `${what[0].toUpperCase()}${what.slice(1)}: ${why}`);
+    };
 
     // 1. Files first, a few at a time.
     const work = [...newBlobs];
@@ -330,31 +396,74 @@ export class SyncEngine {
       for (let id = work.shift(); id; id = work.shift()) {
         const b = await this.db.blobs.get(id);
         if (!b) continue;
-        await this.remote.uploadBlob(id, b.projectId, b.data);
-        await this.db.sync.put({ key: key(BLOB, id), kind: BLOB, id, projectId: b.projectId, hash: 'stored' });
-        this.tick();
+        if (blockedProjects.has(b.projectId)) { blocked.add(key(BLOB, id)); continue; }
+        try {
+          // A fresh in-memory copy: Safari can fail to send a Blob straight out of IndexedDB.
+          const data = await readBlob(b.data);
+          await withRetry(() => this.remote.uploadBlob(id, b.projectId, data));
+          await this.db.sync.put({ key: key(BLOB, id), kind: BLOB, id, projectId: b.projectId, hash: 'stored' });
+          this.tick();
+        } catch (e) {
+          blocked.add(key(BLOB, id));
+          problem(describeItem(BLOB), e);
+          if (!isTransient(e) && /security|policy|permission|authori/i.test(String((e as Error)?.message))) blockedProjects.add(b.projectId);
+        }
       }
     }));
-    // 2. Records, parents before children.
-    for (const { rows } of changed) {
+    // 2. Records, parents before children. A record whose parent or file did not make it waits for the next round.
+    const dependsOn = (kind: Kind, o: Record<string, unknown>): string[] => {
+      switch (kind) {
+        case 'assets': return assetBlobIds(o as unknown as Asset).map((id) => key(BLOB, id));
+        case 'floors': return o.planAssetId ? [key('assets', String(o.planAssetId))] : [];
+        case 'findings': return [key('floors', String(o.floorId)), key('categories', String(o.categoryId))];
+        case 'photos': return [key('assets', String(o.assetId)), key('findings', String(o.findingId))];
+        default: return [];
+      }
+    };
+    for (const { kind, rows: all } of changed) {
+      const rows = all.filter((c) => {
+        const o = c.row.data!;
+        if (blockedProjects.has(c.row.project_id) || dependsOn(kind, o).some((d) => blocked.has(d))) { blocked.add(c.sync.key); return false; }
+        return true;
+      });
       for (let i = 0; i < rows.length; i += 200) {
         const chunk = rows.slice(i, i + 200);
-        await this.remote.upsert(chunk.map((c) => c.row));
-        await this.db.sync.bulkPut(chunk.map((c) => c.sync));
-        this.tick(chunk.length);
+        try {
+          await withRetry(() => this.remote.upsert(chunk.map((c) => c.row)));
+          await this.db.sync.bulkPut(chunk.map((c) => c.sync));
+          this.tick(chunk.length);
+        } catch (e) {
+          if (isTransient(e)) { chunk.forEach((c) => blocked.add(c.sync.key)); problem(describeItem(kind), e); continue; }
+          // Find the row(s) that are refused; send the others.
+          for (const c of chunk) {
+            try {
+              await withRetry(() => this.remote.upsert([c.row]));
+              await this.db.sync.put(c.sync);
+              this.tick();
+            } catch (e1) {
+              blocked.add(c.sync.key);
+              problem(describeItem(kind, c.row.data!), e1);
+              if (kind === 'projects') blockedProjects.add(c.row.id);
+            }
+          }
+        }
       }
     }
     // 3. Deletions as tombstones, children first; then their files.
-    for (let i = 0; i < goneRecords.length; i += 200) {
-      const chunk = goneRecords.slice(i, i + 200);
-      await this.remote.upsert(chunk.map((s) => ({ kind: s.kind as Kind, id: s.id, project_id: s.projectId, data: null, deleted: true, device: this.device })));
-      await this.db.sync.bulkDelete(chunk.map((s) => s.key));
-      this.tick(chunk.length);
-    }
-    if (goneBlobs.length) {
-      await this.remote.deleteBlobs(goneBlobs.map((s) => ({ id: s.id, projectId: s.projectId })));
-      await this.db.sync.bulkDelete(goneBlobs.map((s) => s.key));
-    }
+    try {
+      for (let i = 0; i < goneRecords.length; i += 200) {
+        const chunk = goneRecords.slice(i, i + 200);
+        await withRetry(() => this.remote.upsert(chunk.map((s) => ({ kind: s.kind as Kind, id: s.id, project_id: s.projectId, data: null, deleted: true, device: this.device }))));
+        await this.db.sync.bulkDelete(chunk.map((s) => s.key));
+        this.tick(chunk.length);
+      }
+      if (goneBlobs.length) {
+        await withRetry(() => this.remote.deleteBlobs(goneBlobs.map((s) => ({ id: s.id, projectId: s.projectId }))));
+        await this.db.sync.bulkDelete(goneBlobs.map((s) => s.key));
+        this.tick(goneBlobs.length);
+      }
+    } catch (e) { problem('a deletion', e); }
+    if (problems.size) throw new SyncProblems([...problems.values()]);
     this.pending = 0;
   }
 
@@ -371,8 +480,9 @@ export class SyncEngine {
   }
 
   private fail(e: unknown) {
-    const message = e instanceof Error ? e.message : String(e);
     console.error('sync failed', e);
-    this.report(this.isOnline() ? { kind: 'error', pending: this.pending, message } : { kind: 'offline', pending: this.pending });
+    if (!this.isOnline()) { this.report({ kind: 'offline', pending: this.pending }); return; }
+    const problems = e instanceof SyncProblems ? e.problems : [explainSyncError(e)];
+    this.report({ kind: 'error', pending: this.pending, message: e instanceof SyncProblems ? e.message : problems[0], problems });
   }
 }

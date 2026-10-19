@@ -28,13 +28,43 @@ function describe(s: CloudState): { text: string; tone: 'ok' | 'busy' | 'warn' |
 /** Status pill for top bars. In manual mode it is the "Sync now" button. */
 export function CloudStatus() {
   const s = useCloudState();
+  const [details, setDetails] = useState(false);
   if (s.kind === 'unavailable') return null;
   const d = describe(s);
   return (
-    <button type="button" className={`cloud-status ${d.tone}${s.kind === 'manual' ? ' manual' : ''}`} data-testid="cloud-status" title={d.detail ?? d.text}
-      disabled={s.kind === 'syncing'} onClick={() => (s.kind === 'signedOut' ? (window.location.hash = '/') : syncNow())}>
-      <span className="dot" aria-hidden="true" />{s.kind === 'manual' && <span aria-hidden="true">⟳ </span>}{d.text}
-    </button>
+    <>
+      <button type="button" className={`cloud-status ${d.tone}${s.kind === 'manual' ? ' manual' : ''}`} data-testid="cloud-status" title={d.detail ?? d.text}
+        disabled={s.kind === 'syncing'} onClick={() => (s.kind === 'signedOut' ? (window.location.hash = '/') : s.kind === 'error' ? setDetails(true) : syncNow())}>
+        <span className="dot" aria-hidden="true" />{s.kind === 'manual' && <span aria-hidden="true">⟳ </span>}{d.text}
+      </button>
+      {details && <SyncProblemDialog onClose={() => setDetails(false)} />}
+    </>
+  );
+}
+
+/** Opened by tapping "Sync problem": what did not upload and why (a phone has no hover text). */
+function SyncProblemDialog({ onClose }: { onClose(): void }) {
+  const s = useCloudState();
+  const [copied, setCopied] = useState(false);
+  const problems = s.kind === 'error' ? (s.problems?.length ? s.problems : [s.message]) : [];
+  const email = 'email' in s ? s.email : '';
+  const report = [`Sync problem (${new Date().toLocaleString()})`, `Account: ${email}`, `Waiting: ${'pending' in s ? s.pending : 0}`,
+    ...problems.map((p) => `- ${p}`), `App: ${location.href.split('#')[0]} · ${navigator.userAgent}`].join('\n');
+  const copy = async () => { try { await navigator.clipboard.writeText(report); setCopied(true); } catch { setCopied(false); } };
+  return (
+    <Dialog title="Sync" onClose={onClose}
+      footer={<><button onClick={copy}>{copied ? 'Copied ✓' : 'Copy details'}</button><button onClick={onClose}>Close</button>
+        <button className="primary" disabled={s.kind === 'syncing'} onClick={() => syncNow()}>{s.kind === 'syncing' ? 'Syncing…' : 'Try again'}</button></>}>
+      {s.kind === 'error' && <>
+        <p><b>Some changes have not reached the cloud yet.</b> They are safe on this device{s.pending ? ` (${s.pending} waiting)` : ''}; everything else was uploaded.</p>
+        <ul className="sync-problems" data-testid="sync-problems">{problems.map((p) => <li key={p}>{p}</li>)}</ul>
+        <p className="small muted">Signed in as {email}. Use the same account on your phone and computer.</p>
+      </>}
+      {s.kind === 'syncing' && <p role="status">Syncing{s.pending ? ` · ${s.pending} to go` : ''}…</p>}
+      {(s.kind === 'synced' || (s.kind === 'manual' && !s.pending)) && <p className="ok" role="status">All changes are uploaded ✓</p>}
+      {s.kind === 'manual' && s.pending > 0 && <p role="status">{s.pending} changes still waiting. Tap Try again.</p>}
+      {s.kind === 'offline' && <p role="status">No connection. {s.pending} changes wait on this device and upload when you are back online.</p>}
+    </Dialog>
   );
 }
 

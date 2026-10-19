@@ -19,6 +19,13 @@ export function supabaseRemote(client: SupabaseClient, user: string, sharing = t
     return status === 400 || status === 404 || /not.?found/i.test(e.message);
   };
   return {
+    async ready() {
+      // Refreshes an expired access token; without a session every upload would be refused as "not allowed".
+      const { data, error } = await client.auth.getSession();
+      if (error) throw new Error(error.message);
+      if (!data.session) throw new Error('Sign-in session expired');
+      if (data.session.user.id !== user) throw new Error('Signed in as a different account on this device; sign-in session expired');
+    },
     async upsert(rows: RecordRow[]) {
       ok(await client.from('records').upsert(rows.map((r) => ({ ...r, owner: user })), { onConflict: sharing ? 'kind,id' : 'owner,kind,id' }));
     },

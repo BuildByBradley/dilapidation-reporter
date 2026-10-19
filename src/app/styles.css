@@ -381,3 +381,4 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; margin: 0; f
 @media (max-width: 400px) { .compact .viewer-tools button { font-size: .76rem; } }
 /* dialogs on phones: use the visible screen height; the footer (Capture / Use photo) always stays on screen */
 @media (max-width: 600px) { .backdrop { padding: 8px; } .dialog-body { padding: 10px 12px; } }
+.sync-problems { margin: 8px 0; padding-left: 20px; } .sync-problems li { margin: 4px 0; overflow-wrap: anywhere; }

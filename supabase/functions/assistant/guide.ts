@@ -78,6 +78,7 @@ Dilapidation Inspector records building-condition ("dilapidation") inspections o
 
 ## Troubleshooting
 - Phone and computer show different things: sign in with the same account on both, then tap Sync now (manual mode needs it).
+- "Sync problem": tap it to see what did not upload and why (for example weak signal, a sign-in that expired, or a project that belongs to another account). Everything else is still uploaded; the rest waits safely on the device. Try again fixes signal drops; "Copy details" copies the report to send to the developer.
 - Zoomed PDF looks blurry: check the label at the bottom right of the plan; reload the app if it is old; sync if the original PDF has not arrived yet.
 - "This tab is read-only": the same project is open in another tab or window on that device — close the other one and press Try again.
 - Camera does not start: allow camera access in the browser settings, or use Upload photos.
