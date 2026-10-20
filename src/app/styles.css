@@ -386,3 +386,12 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; margin: 0; f
 .renumber-table th, .renumber-table td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line, #e3e3e3); }
 .renumber-table input { width: 5.5em; }
 .display-width input[aria-label$="number prefix"] { width: 5.5em; }
+.pending-photos .rotate { position: absolute; bottom: -8px; left: -8px; min-height: 28px; min-width: 28px; padding: 0; border-radius: 50%; background: #fff; }
+/* photo crop */
+.crop-stage { position: relative; touch-action: none; cursor: grab; user-select: none; }
+.crop-stage img { position: absolute; left: 50%; top: 50%; max-width: none; pointer-events: none; }
+.crop-frame { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 0 9999px rgba(0,0,0,.55); outline: 2px solid #fff; pointer-events: none;
+  background-image: linear-gradient(rgba(255,255,255,.35) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.35) 1px, transparent 1px);
+  background-size: 33.333% 33.333%; background-position: -1px -1px; }
+.crop-zoom input { width: 140px; }
+.pending-photos .thumb-open { padding: 0; border: 0; background: none; min-height: 0; display: block; }

@@ -36,7 +36,7 @@ Dilapidation Inspector records building-condition ("dilapidation") inspections o
 2. On a phone a full-screen panel opens in three steps — the keyboard does not pop up first:
    - Step 1 Position: a zoomed view and an arrow pad move the pin one plan pixel at a time ("Bigger steps" moves 10). "Show plan to re-tap" hides the panel so you can tap a new spot.
    - Step 2 Details: title (required), category (required), severity, description, location notes.
-   - Step 3 Photos (optional): Take photo or Upload photos; ✎ on a thumbnail draws on it, × removes it.
+   - Step 3 Photos (optional): Take photo or Upload photos; tap a thumbnail to zoom and crop it, ✎ draws on it, ⟳ rotates it a quarter turn, × removes it.
 3. Save finding (the button shows how many photos will be attached).
 - Findings are numbered per floor with the floor's prefix: G-001, G-002… on Ground, L1-001… on Level 1, Roof-001… A number is never reused, even after a finding is deleted.
 - The prefix is set under each floor ("Number prefix"); left empty it comes from the floor name (Ground → G, Level 2 → L2, Roof → Roof).
@@ -47,7 +47,8 @@ Dilapidation Inspector records building-condition ("dilapidation") inspections o
 ## Photos
 - Take photo uses the camera inside the app: Capture → Retake / ✎ Draw on photo / Use photo. Drawing tools: pen, circle, arrow; red, yellow, white, black; thin or thick; Undo and Clear. The drawing is saved into the photo.
 - If the camera is blocked, use "Take photo with device camera" or Upload photos.
-- In a finding: captions, ← → to reorder, Make cover, Delete, tap a photo to see it full size.
+- In a finding: captions, ← → to reorder, ⟲ ⟳ to rotate left or right, Crop, Make cover, Delete, tap a photo to see it full size.
+- Crop: pinch, scroll or use the Zoom slider to zoom in, drag to move the photo under the frame, choose the frame shape (Original, 4:3, 3:4, Square), then "Use cropped photo". The cropped part replaces the photo (caption and order stay).
 - Photos are stored compactly (about 1920 pixels on the long side, roughly 0.25–0.4 MB each) to save storage and mobile data. Drawing on photos that are already saved in a finding is not available yet.
 
 ## Categories

@@ -497,6 +497,31 @@ export async function addPhoto(findingId: string, img: ProcessedImage, caption =
     return photo;
   }));
 }
+/** Swap a saved photo's image (e.g. rotated); caption, order and cover stay. The old image is removed. */
+export async function replacePhotoImage(photoId: string, img: ProcessedImage): Promise<void> {
+  return tracked(() => db.transaction('rw', [db.photos, db.assets, db.blobs, db.floors, db.projects], async () => {
+    const p = await db.photos.get(photoId);
+    if (!p) throw new RepoError('Photo not found');
+    const old = await db.assets.get(p.assetId);
+    const t = nowIso();
+    const shared = img.display === img.original;
+    const ids = { o: uuid(), d: '', t: uuid() };
+    ids.d = shared ? ids.o : uuid();
+    const asset: Asset = {
+      id: uuid(), projectId: p.projectId, kind: 'photo', filename: old?.filename ?? img.filename, mime: img.mime, width: img.width, height: img.height,
+      originalBlobId: ids.o, displayBlobId: ids.d, thumbnailBlobId: ids.t, orientation: 1, sizeBytes: img.original.size, createdAt: t,
+    };
+    await db.blobs.bulkAdd([
+      { id: ids.o, projectId: p.projectId, data: img.original },
+      ...(shared ? [] : [{ id: ids.d, projectId: p.projectId, data: img.display }]),
+      { id: ids.t, projectId: p.projectId, data: img.thumbnail },
+    ]);
+    await db.assets.add(asset);
+    await db.photos.update(photoId, { assetId: asset.id });
+    await removeAsset(p.assetId);
+    await touch(p.projectId);
+  }));
+}
 export const listPhotos = (findingId: string) => db.photos.where('findingId').equals(findingId).sortBy('order');
 export async function updatePhotoCaption(id: string, caption: string): Promise<void> {
   return tracked(async () => { await db.photos.update(id, { caption }); });

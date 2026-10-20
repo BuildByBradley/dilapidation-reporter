@@ -117,3 +117,95 @@ test('renumber findings per floor with a prefix set in the dialog', async ({ pag
   await expect(page.getByTestId('finding-row').filter({ hasText: 'Roof-001' })).toBeVisible();
   expect((await dbAll(page, 'findings')).map((f) => f.reference).sort()).toEqual(['G-001', 'G-002', 'L1-001', 'L1-002', 'L2-001', 'L2-002', 'L3-001', 'Roof-001']);
 });
+
+test('rotate a saved photo: the stored image turns a quarter, caption and cover stay', async ({ page }) => {
+  await openSample(page);
+  await page.getByTestId('finding-row').filter({ hasText: 'L1-002' }).click();
+  const editor = page.getByTestId('finding-editor');
+  const count = await editor.getByTestId('photo-item').count();
+  await editor.getByLabel('Upload photos').setInputFiles(demo('photo-landscape.jpg'));
+  await expect(editor.getByTestId('photo-item')).toHaveCount(count + 1, { timeout: 20_000 });
+  const item = editor.getByTestId('photo-item').last();
+  await item.getByLabel('Photo caption').fill('Turned');
+  await item.getByLabel('Photo caption').blur();
+  const photoRow = async () => {
+    const photos = await dbAll(page, 'photos'), assets = await dbAll(page, 'assets');
+    const p = photos.find((x) => x.caption === 'Turned');
+    return p && { photo: p, asset: assets.find((a) => a.id === p.assetId)! };
+  };
+  await expect.poll(async () => !!(await photoRow())).toBe(true);
+  const before = (await photoRow())!;
+  expect(before.asset.width).toBeGreaterThan(before.asset.height);
+  await item.getByRole('button', { name: /Rotate photo \d+ right/ }).click();
+  await expect.poll(async () => (await photoRow())?.asset?.id !== before.asset.id, { timeout: 10_000 }).toBe(true);
+  const after = (await photoRow())!;
+  expect([after.asset.width, after.asset.height]).toEqual([before.asset.height, before.asset.width]);
+  expect((await dbAll(page, 'assets')).some((a) => a.id === before.asset.id)).toBe(false); // old image removed
+});
+
+test('zoom into a saved photo and keep the cropped part as the photo', async ({ page }) => {
+  await openSample(page);
+  await page.getByTestId('finding-row').filter({ hasText: 'L1-002' }).click();
+  const editor = page.getByTestId('finding-editor');
+  const count = await editor.getByTestId('photo-item').count();
+  await editor.getByLabel('Upload photos').setInputFiles(demo('photo-landscape.jpg'));
+  await expect(editor.getByTestId('photo-item')).toHaveCount(count + 1, { timeout: 20_000 });
+  const item = editor.getByTestId('photo-item').last();
+  await item.getByLabel('Photo caption').fill('Cropped');
+  await item.getByLabel('Photo caption').blur();
+  const row = async () => {
+    const p = (await dbAll(page, 'photos')).find((x) => x.caption === 'Cropped');
+    return p && (await dbAll(page, 'assets')).find((a) => a.id === p.assetId);
+  };
+  await expect.poll(async () => !!(await row())).toBe(true);
+  const before = (await row())!;
+  await item.getByRole('button', { name: /Crop photo \d+/ }).click();
+  const dlg = page.getByRole('dialog', { name: 'Zoom and crop photo' });
+  await dlg.getByRole('button', { name: 'Square' }).click();
+  await dlg.getByLabel('Zoom').fill('2');
+  // drag the photo a little
+  const box = (await dlg.getByTestId('crop-stage').boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down(); await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2 + 20, { steps: 5 }); await page.mouse.up();
+  await page.screenshot({ path: 'test-results/crop-dialog.png' });
+  await dlg.getByRole('button', { name: 'Use cropped photo' }).click();
+  await expect(dlg).toBeHidden();
+  await expect.poll(async () => (await row())?.id !== before.id, { timeout: 10_000 }).toBe(true);
+  const after = (await row())!;
+  expect(after.width).toBe(after.height); // square
+  expect(after.width).toBeLessThan(before.height); // zoomed in: a smaller part of the photo
+});
+
+test('the full-size photo window rotates and crops the photo in place', async ({ page }) => {
+  await openSample(page);
+  await page.getByTestId('finding-row').filter({ hasText: 'L1-002' }).click();
+  const editor = page.getByTestId('finding-editor');
+  const count = await editor.getByTestId('photo-item').count();
+  await editor.getByLabel('Upload photos').setInputFiles(demo('photo-landscape.jpg'));
+  await expect(editor.getByTestId('photo-item')).toHaveCount(count + 1, { timeout: 20_000 });
+  const item = editor.getByTestId('photo-item').last();
+  await item.getByLabel('Photo caption').fill('Viewer');
+  await item.getByLabel('Photo caption').blur();
+  const row = async () => {
+    const p = (await dbAll(page, 'photos')).find((x) => x.caption === 'Viewer');
+    return p && (await dbAll(page, 'assets')).find((a) => a.id === p.assetId);
+  };
+  await expect.poll(async () => !!(await row())).toBe(true);
+  const before = (await row())!;
+  await item.getByRole('button', { name: /Open photo \d+ full size/ }).click();
+  const dlg = page.getByRole('dialog', { name: 'Photo' });
+  await dlg.getByRole('button', { name: 'Rotate right' }).click();
+  await expect.poll(async () => (await row())?.id !== before.id, { timeout: 10_000 }).toBe(true);
+  const rotated = (await row())!;
+  expect([rotated.width, rotated.height]).toEqual([before.height, before.width]);
+  await expect(dlg).toBeVisible(); // stays open on the turned photo
+  await dlg.getByRole('button', { name: 'Zoom & crop' }).click();
+  const crop = page.getByRole('dialog', { name: 'Zoom and crop photo' });
+  await crop.getByRole('button', { name: 'Square' }).click();
+  await crop.getByRole('button', { name: 'Use cropped photo' }).click();
+  await expect(page.getByRole('dialog', { name: 'Photo' })).toBeVisible();
+  await expect.poll(async () => (await row())?.id !== rotated.id, { timeout: 10_000 }).toBe(true);
+  const cropped = (await row())!;
+  expect(cropped.width).toBe(cropped.height);
+  await page.screenshot({ path: 'test-results/lightbox.png' });
+});

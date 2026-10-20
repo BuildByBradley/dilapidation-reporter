@@ -4,19 +4,47 @@ import { Dialog, useObjectUrl, useToast } from '../../components/ui';
 import { db } from '../../data/db';
 import * as repo from '../../data/repo';
 import { useStoredBlob } from '../../data/useBlob';
-import { processPhoto, ImportError } from '../../lib/imaging';
+import { cropPhoto, processPhoto, rotatePhoto, ImportError } from '../../lib/imaging';
+import { PhotoCrop } from './PhotoCrop';
 import { useLive } from '../../lib/useLive';
 import type { Photo } from '../../lib/types';
 import { PhotoMarkup } from './PhotoMarkup';
 
-export function Lightbox({ photo, onClose }: { photo: Photo; onClose: () => void }) {
-  const [asset] = useLive(() => db.assets.get(photo.assetId), [photo.assetId], undefined);
+/** Full-size photo, with rotate and zoom-and-crop that save over the photo (caption, order and cover stay). */
+export function Lightbox({ photo: initial, onClose, readOnly = false }: { photo: Photo; onClose: () => void; readOnly?: boolean }) {
+  const toast = useToast();
+  const [photo] = useLive(() => db.photos.get(initial.id), [initial.id], initial);
+  const [asset] = useLive(() => (photo ? db.assets.get(photo.assetId) : Promise.resolve(undefined)), [photo?.assetId], undefined);
   const blob = useStoredBlob(asset?.displayBlobId);
   const url = useObjectUrl(blob);
+  const [cropping, setCropping] = useState(false);
+  const [busy, setBusy] = useState(false);
+  if (!photo) return null;
+  const save = async (label: string, make: (b: Blob, filename: string) => Promise<repo.ProcessedImage>) => {
+    if (!blob || !asset) return;
+    setBusy(true);
+    try { await repo.replacePhotoImage(photo.id, await make(blob, asset.filename)); setCropping(false); }
+    catch (e) { toast('error', `Could not ${label} the photo: ${e instanceof Error ? e.message : String(e)}`); }
+    finally { setBusy(false); }
+  };
+  const edit = !readOnly && !!blob;
   return (
-    <Dialog title="Photo" wide onClose={onClose}>
-      {url ? <img className="lightbox-img" src={url} alt={photo.caption || 'Finding photo'} /> : <p>Loading…</p>}
-      {photo.caption && <p>{photo.caption}</p>}
+    <Dialog title={cropping ? 'Zoom and crop photo' : 'Photo'} wide onClose={onClose}
+      footer={cropping ? undefined : edit ? <>
+        <button disabled={busy} aria-label="Rotate left" onClick={() => save('rotate', (b, n) => rotatePhoto(b, n, -1))}>⟲ Rotate left</button>
+        <button disabled={busy} aria-label="Rotate right" onClick={() => save('rotate', (b, n) => rotatePhoto(b, n, 1))}>⟳ Rotate right</button>
+        <button disabled={busy} onClick={() => setCropping(true)}>Zoom &amp; crop</button>
+        <button onClick={onClose}>Close</button>
+      </> : undefined}>
+      {cropping && blob ? (
+        <PhotoCrop src={blob} onCancel={() => setCropping(false)} onDone={(r) => save('crop', (b, n) => cropPhoto(b, n, r))} />
+      ) : (
+        <>
+          {url ? <img className="lightbox-img" src={url} alt={photo.caption || 'Finding photo'} /> : <p>Loading…</p>}
+          {busy && <p className="small" role="status">Saving…</p>}
+          {photo.caption && <p>{photo.caption}</p>}
+        </>
+      )}
     </Dialog>
   );
 }
@@ -89,6 +117,7 @@ export function PhotoSection({ findingId, photos, readOnly }: { findingId: strin
   const toast = useToast();
   const [cameraOpen, setCameraOpen] = useState(false);
   const [viewing, setViewing] = useState<Photo | null>(null);
+  const [cropping, setCropping] = useState<{ photo: Photo; blob: Blob; filename: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const captureRef = useRef<HTMLInputElement>(null);
@@ -105,6 +134,25 @@ export function PhotoSection({ findingId, photos, readOnly }: { findingId: strin
       }
     }
     setBusy(null);
+  }
+
+  async function photoBlob(p: Photo) {
+    const a = await db.assets.get(p.assetId);
+    const blob = a && (await db.blobs.get(a.displayBlobId))?.data;
+    if (!a || !blob) throw new Error('This photo has not finished syncing to this device yet.');
+    return { blob, filename: a.filename };
+  }
+  async function rotate(p: Photo, turn: 1 | -1) {
+    setBusy('Rotating photo…');
+    try {
+      const { blob, filename } = await photoBlob(p);
+      await repo.replacePhotoImage(p.id, await rotatePhoto(blob, filename, turn));
+    } catch (e) {
+      toast('error', `Could not rotate the photo: ${e instanceof Error ? e.message : String(e)}`);
+    } finally { setBusy(null); }
+  }
+  async function startCrop(p: Photo) {
+    try { setCropping({ photo: p, ...(await photoBlob(p)) }); } catch (e) { toast('error', e instanceof Error ? e.message : String(e)); }
   }
 
   return (
@@ -129,6 +177,9 @@ export function PhotoSection({ findingId, photos, readOnly }: { findingId: strin
                 {p.isCover ? <span className="tag">Cover</span> : <button disabled={readOnly} onClick={() => guard(repo.setPhotoCover(p.id))}>Make cover</button>}
                 <button disabled={readOnly || i === 0} aria-label={`Move photo ${i + 1} earlier`} onClick={() => guard(repo.movePhoto(p.id, -1))}>←</button>
                 <button disabled={readOnly || i === photos.length - 1} aria-label={`Move photo ${i + 1} later`} onClick={() => guard(repo.movePhoto(p.id, 1))}>→</button>
+                <button disabled={readOnly || !!busy} aria-label={`Rotate photo ${i + 1} left`} title="Rotate left" onClick={() => rotate(p, -1)}>⟲</button>
+                <button disabled={readOnly || !!busy} aria-label={`Rotate photo ${i + 1} right`} title="Rotate right" onClick={() => rotate(p, 1)}>⟳</button>
+                <button disabled={readOnly || !!busy} aria-label={`Crop photo ${i + 1}`} onClick={() => void startCrop(p)}>Crop</button>
                 <button className="danger" disabled={readOnly} onClick={() => guard(repo.deletePhoto(p.id))}>Delete</button>
               </div>
             </div>
@@ -137,7 +188,17 @@ export function PhotoSection({ findingId, photos, readOnly }: { findingId: strin
       </ul>
       {cameraOpen && <CameraDialog onClose={() => setCameraOpen(false)} onFallback={() => captureRef.current?.click()}
         onAccept={async (blob) => { await addFiles([new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' })]); }} />}
-      {viewing && <Lightbox photo={viewing} onClose={() => setViewing(null)} />}
+      {viewing && <Lightbox photo={viewing} readOnly={readOnly} onClose={() => setViewing(null)} />}
+      {cropping && (
+        <Dialog title="Zoom and crop photo" wide onClose={() => setCropping(null)}>
+          <PhotoCrop src={cropping.blob} onCancel={() => setCropping(null)} onDone={async (r) => {
+            try {
+              await repo.replacePhotoImage(cropping.photo.id, await cropPhoto(cropping.blob, cropping.filename, r));
+              setCropping(null);
+            } catch (e) { toast('error', `Could not crop the photo: ${e instanceof Error ? e.message : String(e)}`); }
+          }} />
+        </Dialog>
+      )}
     </section>
   );
 }

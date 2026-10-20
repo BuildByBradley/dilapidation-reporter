@@ -105,6 +105,45 @@ export async function processPhoto(file: Blob, filename: string, o: Opts = {}): 
   } finally { bmp.close(); }
 }
 
+/**
+ * Turn a stored photo a quarter turn (1 = clockwise, -1 = anticlockwise). Encoded at high quality so repeated
+ * turns do not visibly degrade it; size stays within the stored-photo limits.
+ */
+export async function rotatePhoto(blob: Blob, filename: string, turn: 1 | -1): Promise<ProcessedImage> {
+  const bmp = await decodeBitmap(blob);
+  try {
+    const src = scaled(bmp, bmp.width, bmp.height, LIMITS.photoStoreEdge, true);
+    const c = newCanvas(src.height, src.width);
+    const ctx = c.getContext('2d');
+    if (!ctx) throw new ImportError('Canvas is unavailable in this browser.');
+    ctx.translate(c.width / 2, c.height / 2);
+    ctx.rotate((turn * Math.PI) / 2);
+    ctx.drawImage(src, -src.width / 2, -src.height / 2);
+    const stored = await canvasToBlob(c, 'image/jpeg', 0.9);
+    const thumbnail = await canvasToBlob(scaled(c, c.width, c.height, LIMITS.thumbEdge, true), 'image/jpeg', 0.75);
+    return { filename, mime: 'image/jpeg', width: c.width, height: c.height, original: stored, display: stored, thumbnail, orientation: 1 };
+  } finally { bmp.close(); }
+}
+
+/** Keep only part of a photo (rectangle in its own pixels); the result is stored like any photo (≤ 1920 px). */
+export async function cropPhoto(blob: Blob, filename: string, r: { x: number; y: number; w: number; h: number }): Promise<ProcessedImage> {
+  const bmp = await decodeBitmap(blob);
+  try {
+    const x = Math.max(0, Math.min(bmp.width - 1, r.x)), y = Math.max(0, Math.min(bmp.height - 1, r.y));
+    const w = Math.max(1, Math.min(bmp.width - x, r.w)), h = Math.max(1, Math.min(bmp.height - y, r.h));
+    const k = Math.min(1, LIMITS.photoStoreEdge / Math.max(w, h));
+    const c = newCanvas(w * k, h * k);
+    const ctx = c.getContext('2d');
+    if (!ctx) throw new ImportError('Canvas is unavailable in this browser.');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(bmp, x, y, w, h, 0, 0, c.width, c.height);
+    const stored = await canvasToBlob(c, 'image/jpeg', 0.9);
+    const thumbnail = await canvasToBlob(scaled(c, c.width, c.height, LIMITS.thumbEdge, true), 'image/jpeg', 0.75);
+    return { filename, mime: 'image/jpeg', width: c.width, height: c.height, original: stored, display: stored, thumbnail, orientation: 1 };
+  } finally { bmp.close(); }
+}
+
 declare global { interface Window { claude?: { use?: (name: string) => Promise<unknown> } } }
 
 /** True when running inside a locked-down host frame (e.g. a hosted preview) that has no window.print() and no direct downloads. */

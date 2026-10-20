@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type Ref } from 'react';
 import { useObjectUrl, useToast } from '../../components/ui';
 import type { ProcessedImage } from '../../data/repo';
-import { ImportError, processPhoto } from '../../lib/imaging';
+import { ImportError, cropPhoto, processPhoto, rotatePhoto } from '../../lib/imaging';
+import { PhotoCrop } from '../photos/PhotoCrop';
 import { SEVERITIES, type Category, type Severity } from '../../lib/types';
 import { CameraDialog } from '../photos/PhotoSection';
 import { PhotoMarkup } from '../photos/PhotoMarkup';
@@ -113,6 +114,7 @@ function PendingPhotos({ photos, setPhotos, stepNo }: { photos: ProcessedImage[]
   const [cameraOpen, setCameraOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [drawing, setDrawing] = useState<number | null>(null);
+  const [cropping, setCropping] = useState<number | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const captureRef = useRef<HTMLInputElement>(null);
   const latest = useRef(photos);
@@ -144,9 +146,17 @@ function PendingPhotos({ photos, setPhotos, stepNo }: { photos: ProcessedImage[]
       {busy && <p className="small" role="status">{busy}</p>}
       {photos.length > 0 && (
         <ul className="pending-photos" data-testid="pending-photos">
-          {photos.map((p, i) => <PendingThumb key={i} img={p} index={i} onRemove={() => setPhotos(photos.filter((_, j) => j !== i))} onDraw={() => setDrawing(i)} />)}
+          {photos.map((p, i) => <PendingThumb key={i} img={p} index={i} onRemove={() => setPhotos(photos.filter((_, j) => j !== i))} onDraw={() => setDrawing(i)} onCrop={() => setCropping(i)}
+            onRotate={async () => {
+              try {
+                const img = await rotatePhoto(p.original, p.filename, 1);
+                latest.current = latest.current.map((x, j) => (j === i ? img : x));
+                setPhotos(latest.current);
+              } catch (e) { toast('error', e instanceof Error ? e.message : String(e)); }
+            }} />)}
         </ul>
       )}
+      {photos.length > 0 && <p className="small muted">Tap a photo to zoom and crop · ✎ draw · ⟳ rotate · × remove</p>}
       {drawing !== null && photos[drawing] && (
         <Dialog title="Draw on photo" wide onClose={() => setDrawing(null)}>
           <PhotoMarkup src={photos[drawing].original} onCancel={() => setDrawing(null)} onDone={async (b) => {
@@ -161,19 +171,33 @@ function PendingPhotos({ photos, setPhotos, stepNo }: { photos: ProcessedImage[]
           }} />
         </Dialog>
       )}
+      {cropping !== null && photos[cropping] && (
+        <Dialog title="Zoom and crop photo" wide onClose={() => setCropping(null)}>
+          <PhotoCrop src={photos[cropping].original} onCancel={() => setCropping(null)} onDone={async (r) => {
+            const i = cropping;
+            try {
+              const img = await cropPhoto(photos[i].original, photos[i].filename, r);
+              latest.current = latest.current.map((x, j) => (j === i ? img : x));
+              setPhotos(latest.current);
+              setCropping(null);
+            } catch (e) { toast('error', e instanceof Error ? e.message : String(e)); }
+          }} />
+        </Dialog>
+      )}
       {cameraOpen && <CameraDialog onClose={() => setCameraOpen(false)} onFallback={() => captureRef.current?.click()}
         onAccept={async (blob) => { await addFiles([new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' })]); }} />}
     </div>
   );
 }
 
-function PendingThumb({ img, index, onRemove, onDraw }: { img: ProcessedImage; index: number; onRemove(): void; onDraw(): void }) {
+function PendingThumb({ img, index, onRemove, onDraw, onRotate, onCrop }: { img: ProcessedImage; index: number; onRemove(): void; onDraw(): void; onRotate(): void; onCrop(): void }) {
   const url = useObjectUrl(img.thumbnail);
   return (
     <li>
-      {url && <img src={url} alt={`New photo ${index + 1}`} />}
+      {url && <button className="thumb-open" aria-label={`Zoom and crop new photo ${index + 1}`} title="Zoom and crop" onClick={onCrop}><img src={url} alt={`New photo ${index + 1}`} /></button>}
       <button className="remove" aria-label={`Remove new photo ${index + 1}`} onClick={onRemove}>×</button>
       <button className="draw" aria-label={`Draw on new photo ${index + 1}`} onClick={onDraw}>✎</button>
+      <button className="rotate" aria-label={`Rotate new photo ${index + 1}`} title="Rotate right" onClick={onRotate}>⟳</button>
     </li>
   );
 }
