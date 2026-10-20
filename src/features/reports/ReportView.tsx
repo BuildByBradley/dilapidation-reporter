@@ -177,7 +177,6 @@ export function ReportView({ projectId }: { projectId: string }) {
             </div>
           ))}
         </section>
-        <footer className="report-foot small muted">{p.name} — As built Inspection Report (Draft). Generated {fmtTime(new Date().toISOString())}.</footer>
       </article>
     </div>
   );
