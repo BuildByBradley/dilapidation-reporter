@@ -79,8 +79,8 @@ export function ReportView({ projectId }: { projectId: string }) {
           s[f.id] = await planSnapshotBlob(bmp, f.findings.map((x) => ({ n: String(referenceNumber(x.reference)), u: x.u, v: x.v, colour: x.categoryColour })));
           for (const x of f.findings) {
             // Key plan (the wider extract, with the detail area outlined) and a closer detail view of the same spot.
-            ins[x.id] = await insetBlob(bmp, x.u, x.v, x.categoryColour, x.reference, 720, 540, KEY_PLAN_SPAN, DETAIL_SPAN);
-            det[x.id] = await insetBlob(bmp, x.u, x.v, x.categoryColour, x.reference, 720, 540, DETAIL_SPAN);
+            ins[x.id] = await insetBlob(bmp, x.u, x.v, x.categoryColour, undefined, 720, 540, KEY_PLAN_SPAN, DETAIL_SPAN);
+            det[x.id] = await insetBlob(bmp, x.u, x.v, x.categoryColour, undefined, 720, 540, DETAIL_SPAN); // no tag: the reference heads the block
           }
         } finally { bmp.close(); }
         if (!live) return;

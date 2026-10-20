@@ -43,6 +43,23 @@ export async function planSnapshotBlob(img: ImageBitmap, pins: SnapPin[], maxEdg
   return canvasToBlob(drawPlanWithPins(img, pins, maxEdge), 'image/jpeg', 0.9);
 }
 
+/** Teardrop pin with its tip exactly at (x, y), as drawn in the plan viewer. */
+export function drawTeardropPin(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, colour: string, opacity = 1) {
+  const cy = y - r * 2.35;
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.bezierCurveTo(x - r * 0.35, y - (y - cy) * 0.45, x - r, cy + r * 0.9, x - r, cy);
+  ctx.arc(x, cy, r, Math.PI, 0);
+  ctx.bezierCurveTo(x + r, cy + r * 0.9, x + r * 0.35, y - (y - cy) * 0.45, x, y);
+  ctx.closePath();
+  ctx.fillStyle = colour; ctx.fill();
+  ctx.lineWidth = Math.max(2, r * 0.18); ctx.strokeStyle = '#fff'; ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x, cy, r * 0.36, 0, 7); ctx.fill();
+  ctx.restore();
+}
+
 /** Width of the key plan around a pin, and of the closer detail view, as a share of the plan's width. */
 export const KEY_PLAN_SPAN = 0.22, DETAIL_SPAN = 0.08;
 
@@ -55,7 +72,7 @@ export function insetRect(img: { width: number; height: number }, u: number, v: 
 }
 
 /**
- * Local plan detail around a pin, with the pin ring and, optionally, a reference tag under it.
+ * Local plan detail around a pin, with the pin (as on the plans, half transparent) and, optionally, a reference tag under it.
  * `span`: how much of the plan's width it covers (smaller = closer). `outlineSpan`: outline the area a closer view shows.
  */
 export async function insetBlob(img: ImageBitmap, u: number, v: number, colour: string, label?: string, outW = 720, outH = 540,
@@ -68,15 +85,14 @@ export async function insetBlob(img: ImageBitmap, u: number, v: number, colour: 
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img, cx - cropW / 2, cy - cropH / 2, cropW, cropH, 0, 0, outW, outH);
   const px = (u * img.width - (cx - cropW / 2)) * (outW / cropW), py = (v * img.height - (cy - cropH / 2)) * (outH / cropH);
-  ctx.lineWidth = 5; ctx.strokeStyle = '#fff'; ctx.beginPath(); ctx.arc(px, py, 14, 0, 7); ctx.stroke();
-  ctx.lineWidth = 3; ctx.strokeStyle = colour; ctx.beginPath(); ctx.arc(px, py, 14, 0, 7); ctx.stroke();
-  ctx.fillStyle = colour; ctx.beginPath(); ctx.arc(px, py, 4, 0, 7); ctx.fill();
   if (outlineSpan) {
     const d = insetRect(img, u, v, outW, outH, outlineSpan), k = outW / cropW;
     ctx.setLineDash([10, 6]); ctx.lineWidth = 2.5; ctx.strokeStyle = '#1d1f20';
     ctx.strokeRect((d.x - r.x) * k, (d.y - r.y) * k, d.w * k, d.h * k);
     ctx.setLineDash([]);
   }
+  // The same teardrop pin as on the plans, half transparent so the drawing under it stays readable.
+  drawTeardropPin(ctx, px, py, 22, colour, 0.5);
   if (label) {
     ctx.font = 'bold 34px "Barlow Condensed", "Arial Narrow", Arial, sans-serif';
     const w = ctx.measureText(label).width + 20, h = 44;
