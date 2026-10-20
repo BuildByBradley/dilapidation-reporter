@@ -52,6 +52,18 @@ describe('projects and floors', () => {
     const after = await repo.listFloors(p.id);
     expect(after[0].id).toBe(b.id); expect(after[1].id).toBe(a.id);
   });
+  it('moves floors that share the same order number (e.g. after syncing two devices)', async () => {
+    const p = await repo.createProject();
+    const floors = await repo.listFloors(p.id);
+    await Promise.all(floors.slice(0, 2).map((f) => db.floors.update(f.id, { order: 0 })));
+    const before = await repo.listFloors(p.id);
+    await repo.moveFloor(before[0].id, 1);
+    const after = await repo.listFloors(p.id);
+    expect(after[1].id).toBe(before[0].id); expect(after[0].id).toBe(before[1].id);
+    expect(after.map((f) => f.order)).toEqual([0, 1, 2, 3, 4]);
+    await repo.moveFloor(before[0].id, 1); // and keeps going down
+    expect((await repo.listFloors(p.id))[2].id).toBe(before[0].id);
+  });
 });
 
 describe('findings', () => {

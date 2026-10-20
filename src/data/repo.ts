@@ -160,8 +160,10 @@ export async function duplicateProject(id: string): Promise<Project> {
 }
 
 // ---------- floors & plans ----------
+/** Floors in display order. Ties (two floors with the same order, e.g. added on two devices) keep a stable order. */
 export async function listFloors(projectId: string): Promise<Floor[]> {
-  return db.floors.where('projectId').equals(projectId).sortBy('order');
+  const all = await db.floors.where('projectId').equals(projectId).toArray();
+  return all.sort((a, b) => a.order - b.order || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
 }
 export async function updateFloor(id: string, patch: Partial<Pick<Floor, 'name' | 'displayWidth'>>): Promise<void> {
   return tracked(async () => {
@@ -177,7 +179,7 @@ export async function updateFloor(id: string, patch: Partial<Pick<Floor, 'name' 
 /** Add an empty floor on top of the stack, named after the next level number. */
 export async function addFloor(projectId: string): Promise<Floor> {
   return tracked(() => db.transaction('rw', db.floors, db.projects, async () => {
-    const all = await db.floors.where('projectId').equals(projectId).sortBy('order');
+    const all = await listFloors(projectId);
     const names = new Set(all.map((f) => f.name.trim().toLowerCase()));
     let n = all.length;
     while (names.has(`level ${n}`)) n++;
@@ -204,11 +206,12 @@ export async function moveFloor(id: string, dir: -1 | 1): Promise<void> {
   return tracked(() => db.transaction('rw', db.floors, db.projects, async () => {
     const f = await db.floors.get(id);
     if (!f) throw new RepoError('Floor not found');
-    const all = await db.floors.where('projectId').equals(f.projectId).sortBy('order');
+    const all = await listFloors(f.projectId);
     const i = all.findIndex((x) => x.id === id), j = i + dir;
     if (j < 0 || j >= all.length) return;
-    await db.floors.update(all[i].id, { order: all[j].order });
-    await db.floors.update(all[j].id, { order: all[i].order });
+    // Renumber the whole list: swapping two equal order values would change nothing.
+    [all[i], all[j]] = [all[j], all[i]];
+    for (const [k, x] of all.entries()) if (x.order !== k) await db.floors.update(x.id, { order: k });
     await touch(f.projectId);
   }));
 }
