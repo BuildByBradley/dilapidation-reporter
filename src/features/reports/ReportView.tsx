@@ -6,7 +6,7 @@ import * as repo from '../../data/repo';
 import { downloadBlob, inHostFrame } from '../../lib/imaging';
 import { DETAIL_SPAN, KEY_PLAN_SPAN, insetBlob, planSnapshotBlob } from '../../lib/planSnapshot';
 import { buildCsv, buildReportModel, draftSummary, type ReportFinding, type ReportModel } from '../../lib/report';
-import { severityLabel, type Asset, type Project, type Severity } from '../../lib/types';
+import type { Asset, Project } from '../../lib/types';
 import { SaveIndicator } from '../../components/SaveIndicator';
 
 type Status = { loaded: number; total: number; failed: string[] };
@@ -215,17 +215,6 @@ function ExecutiveSummary({ model, project }: { model: ReportModel; project: Pro
   );
 }
 
-/** Severity as text plus a shape, so it reads in black-and-white print. */
-function SeverityLabel({ severity }: { severity: Severity }) {
-  const icon = {
-    not_assessed: <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" strokeDasharray="1.6 1.4" />,
-    minor: <circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" />,
-    moderate: <><circle cx="5" cy="5" r="4" fill="none" stroke="currentColor" /><path d="M5 1a4 4 0 0 1 0 8z" fill="currentColor" /></>,
-    major: <circle cx="5" cy="5" r="4.2" fill="currentColor" />,
-  }[severity];
-  return <span className={`lbl sev ${severity}`}><svg viewBox="0 0 10 10" aria-hidden="true">{icon}</svg><b>{severityLabel(severity)}</b></span>;
-}
-
 /** The floor's reference prefix (G-001 → G, L1-004 → L1); for older references, from the floor name. */
 const floorBadge = (reference: string, name: string) => {
   const prefix = referencePrefix(reference);
@@ -279,7 +268,6 @@ function FindingBlock({ x, inset, detail, track, photoLoader, keyed, assets }: {
             <div className="f-title">{x.title}</div>
             <div className="f-labels">
               <span className="lbl"><span className="sw" style={{ background: x.categoryColour }} aria-hidden="true" /><b>{x.categoryName}</b></span>
-              <SeverityLabel severity={x.severity} />
               <span className="lbl"><span className="k">Floor</span><b>{x.floorName}</b></span>
             </div>
           </header>
