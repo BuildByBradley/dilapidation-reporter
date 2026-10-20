@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { referenceNumber, referencePrefix } from '../../lib/ids';
 import { go } from '../../app/App';
-import { fmtTime } from '../../components/ui';
 import { flushAll } from '../../data/flush';
 import * as repo from '../../data/repo';
 import { downloadBlob, inHostFrame } from '../../lib/imaging';
@@ -136,7 +135,6 @@ export function ReportView({ projectId }: { projectId: string }) {
             <dt>Client</dt><dd>{p.client || '—'}</dd>
             <dt>Inspector</dt><dd>{p.inspector || '—'}</dd>
             <dt>Inspection date</dt><dd>{p.inspectionDate}</dd>
-            <dt>Report generated</dt><dd>{fmtTime(new Date().toISOString())}</dd>
           </dl>
           {p.isSample && <p className="sample-note">SAMPLE DATA — invented drawings and findings for demonstration only.</p>}
         </header>
