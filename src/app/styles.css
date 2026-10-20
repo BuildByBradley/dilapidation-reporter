@@ -326,7 +326,7 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; margin: 0; f
 .pending-photos .draw { position: absolute; bottom: -8px; right: -8px; min-height: 28px; min-width: 28px; padding: 0; border-radius: 50%; background: #fff; }
 
 /* ---- executive summary (1–2 pages after the cover) ---- */
-.report .exec { break-before: page; page-break-before: always; }
+.report .exec { margin-top: 6mm; } /* on the cover page, under the project details */
 .report .exec + section { break-before: page; page-break-before: always; }
 .report .exec-text { font-size: 11pt; line-height: 1.5; margin: 3mm 0 1mm; max-width: 170mm; text-wrap: pretty; }
 .report .exec-auto { margin: 0 0 3mm; font-style: italic; }
