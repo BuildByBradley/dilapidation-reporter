@@ -3,6 +3,7 @@ import { PhotoSection } from '../photos/PhotoSection';
 import { Confirm, useToast } from '../../components/ui';
 import { registerFlush } from '../../data/flush';
 import * as repo from '../../data/repo';
+import { NEW_CATEGORY, promptNewCategory } from '../categories/newCategory';
 import { SEVERITIES, type Category, type Finding, type Floor, type Photo, type Severity } from '../../lib/types';
 
 type Fields = { title: string; description: string; locationNotes: string; severity: Severity; categoryId: string };
@@ -68,8 +69,12 @@ export function FindingEditor({ finding, categories, floors, photos, readOnly, o
       )}
       <label>Title<input value={f.title} disabled={readOnly} onChange={(e) => change({ title: e.target.value })} /></label>
       <div className="two">
-        <label>Category<select value={f.categoryId} disabled={readOnly} onChange={(e) => change({ categoryId: e.target.value }, true)}>
+        <label>Category<select value={f.categoryId} disabled={readOnly} onChange={async (e) => {
+          if (e.target.value !== NEW_CATEGORY) { change({ categoryId: e.target.value }, true); return; }
+          try { const id = await promptNewCategory(finding.projectId); if (id) change({ categoryId: id }, true); } catch (err) { toast('error', err instanceof Error ? err.message : String(err)); }
+        }}>
           {selectable.map((c) => <option key={c.id} value={c.id}>{c.name}{c.archived ? ' (archived)' : ''}</option>)}
+          <option value={NEW_CATEGORY}>+ New category…</option>
         </select></label>
         <label>Severity<select value={f.severity} disabled={readOnly} onChange={(e) => change({ severity: e.target.value as Severity }, true)}>
           {SEVERITIES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}

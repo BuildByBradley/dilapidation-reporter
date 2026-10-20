@@ -3,6 +3,7 @@ import { useObjectUrl, useToast } from '../../components/ui';
 import type { ProcessedImage } from '../../data/repo';
 import { ImportError, cropPhoto, processPhoto, rotatePhoto } from '../../lib/imaging';
 import { PhotoCrop } from '../photos/PhotoCrop';
+import { NEW_CATEGORY, promptNewCategory } from '../categories/newCategory';
 import { SEVERITIES, type Category, type Severity } from '../../lib/types';
 import { CameraDialog } from '../photos/PhotoSection';
 import { PhotoMarkup } from '../photos/PhotoMarkup';
@@ -28,6 +29,7 @@ export function PlacementPanel({ mode, reference, floorName, u, v, assetWidth, a
   magCrop?: number; setMagCrop?(n: number): void;
   pendingPhotos: ProcessedImage[]; setPendingPhotos(p: ProcessedImage[]): void;
 }) {
+  const toast = useToast();
   const [big, setBig] = useState(false);
   const step = big ? 10 : 1;
   const active = categories.filter((c) => !c.archived);
@@ -85,8 +87,14 @@ export function PlacementPanel({ mode, reference, floorName, u, v, assetWidth, a
             <h3>{stepNo(2)}Details</h3>
             <label>Title *<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus={!compact} enterKeyHint="done" /></label>
             <div className="two">
-              <label>Category *<select value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}>
+              <label>Category *<select value={form.categoryId} onChange={async (e) => {
+                if (e.target.value !== NEW_CATEGORY) { setForm({ ...form, categoryId: e.target.value }); return; }
+                const projectId = categories[0]?.projectId;
+                if (!projectId) return;
+                try { const id = await promptNewCategory(projectId); if (id) setForm({ ...form, categoryId: id }); } catch (err) { toast('error', err instanceof Error ? err.message : String(err)); }
+              }}>
                 <option value="">Choose…</option>{active.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                <option value={NEW_CATEGORY}>+ New category…</option>
               </select></label>
               <label>Severity<select value={form.severity} onChange={(e) => setForm({ ...form, severity: e.target.value as Severity })}>
                 {SEVERITIES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}

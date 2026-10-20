@@ -209,3 +209,18 @@ test('the full-size photo window rotates and crops the photo in place', async ({
   expect(cropped.width).toBe(cropped.height);
   await page.screenshot({ path: 'test-results/lightbox.png' });
 });
+
+test('add a new category straight from a finding’s category list', async ({ page }) => {
+  await openSample(page);
+  await page.getByTestId('finding-row').filter({ hasText: 'L1-002' }).click();
+  page.once('dialog', (d) => void d.accept('Lift doors'));
+  await page.getByTestId('finding-editor').getByLabel('Category').selectOption({ label: '+ New category…' });
+  await expect(page.getByTestId('finding-editor').getByLabel('Category')).toHaveValue(/.+/);
+  await expect(page.getByTestId('finding-editor').getByLabel('Category').locator('option:checked')).toHaveText('Lift doors');
+  await expect.poll(async () => (await dbAll(page, 'findings')).find((f) => f.reference === 'L1-002')?.categoryId).toBe(
+    (await dbAll(page, 'categories')).find((c) => c.name === 'Lift doors')?.id);
+  // cancelling the name leaves the category unchanged
+  page.once('dialog', (d) => void d.dismiss());
+  await page.getByTestId('finding-editor').getByLabel('Category').selectOption({ label: '+ New category…' });
+  await expect(page.getByTestId('finding-editor').getByLabel('Category').locator('option:checked')).toHaveText('Lift doors');
+});

@@ -52,6 +52,7 @@ Dilapidation Inspector records building-condition ("dilapidation") inspections o
 - Photos are stored compactly (about 1920 pixels on the long side, roughly 0.25–0.4 MB each) to save storage and mobile data. Drawing on photos that are already saved in a finding is not available yet.
 
 ## Categories
+- Quickest: in a finding's Category list choose "+ New category…", type the name, and it is added (with its own colour) and selected.
 - Project ▾ → Categories: add, rename, recolour, reorder, archive/restore, or delete (findings in a deleted category are moved to another one first).
 - New projects start with: Cracks, Moisture / water damage, Finishes, Doors / windows, Floors, Ceilings, External works, Other. Changes affect only that project.
 

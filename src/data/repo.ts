@@ -422,6 +422,12 @@ export async function createCategory(projectId: string, name: string, colour = '
     return cat;
   }));
 }
+const NEW_CATEGORY_COLOURS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#9a6324', '#469990', '#800000', '#808000', '#000075', '#bfa600', '#dc6e9b'];
+/** Add a category from a finding's dropdown: given a colour no other category of the project uses yet (if any left). */
+export async function quickAddCategory(projectId: string, name: string): Promise<Category> {
+  const used = new Set((await listCategories(projectId)).map((c) => c.colour.toLowerCase()));
+  return createCategory(projectId, name, NEW_CATEGORY_COLOURS.find((c) => !used.has(c)) ?? '#555555');
+}
 export async function updateCategory(id: string, patch: { name?: string; colour?: string }): Promise<void> {
   return tracked(() => db.transaction('rw', db.categories, async () => {
     const c = await db.categories.get(id);
