@@ -43,12 +43,25 @@ export async function planSnapshotBlob(img: ImageBitmap, pins: SnapPin[], maxEdg
   return canvasToBlob(drawPlanWithPins(img, pins, maxEdge), 'image/jpeg', 0.9);
 }
 
-/** Local inset: a crop of the plan around one pin, so dense areas stay legible. */
-/** Local plan detail around a pin (4:3), with the pin ring and, optionally, a reference tag under it. */
-export async function insetBlob(img: ImageBitmap, u: number, v: number, colour: string, label?: string, outW = 720, outH = 540): Promise<Blob> {
-  const cropW = Math.min(img.width, img.width * 0.22), cropH = cropW * (outH / outW);
+/** Width of the key plan around a pin, and of the closer detail view, as a share of the plan's width. */
+export const KEY_PLAN_SPAN = 0.22, DETAIL_SPAN = 0.08;
+
+/** The part of the plan an inset shows (plan pixels): `span` of the plan's width around the pin, kept inside the plan. */
+export function insetRect(img: { width: number; height: number }, u: number, v: number, outW = 720, outH = 540, span = KEY_PLAN_SPAN) {
+  const cropW = Math.min(img.width, img.width * span), cropH = cropW * (outH / outW);
   const cx = Math.min(img.width - cropW / 2, Math.max(cropW / 2, u * img.width));
   const cy = Math.min(img.height - cropH / 2, Math.max(cropH / 2, v * img.height));
+  return { x: cx - cropW / 2, y: cy - cropH / 2, w: cropW, h: cropH };
+}
+
+/**
+ * Local plan detail around a pin, with the pin ring and, optionally, a reference tag under it.
+ * `span`: how much of the plan's width it covers (smaller = closer). `outlineSpan`: outline the area a closer view shows.
+ */
+export async function insetBlob(img: ImageBitmap, u: number, v: number, colour: string, label?: string, outW = 720, outH = 540,
+  span = KEY_PLAN_SPAN, outlineSpan?: number): Promise<Blob> {
+  const r = insetRect(img, u, v, outW, outH, span);
+  const cropW = r.w, cropH = r.h, cx = r.x + r.w / 2, cy = r.y + r.h / 2;
   const c = newCanvas(outW, outH);
   const ctx = c.getContext('2d')!;
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, outW, outH);
@@ -58,6 +71,12 @@ export async function insetBlob(img: ImageBitmap, u: number, v: number, colour: 
   ctx.lineWidth = 5; ctx.strokeStyle = '#fff'; ctx.beginPath(); ctx.arc(px, py, 14, 0, 7); ctx.stroke();
   ctx.lineWidth = 3; ctx.strokeStyle = colour; ctx.beginPath(); ctx.arc(px, py, 14, 0, 7); ctx.stroke();
   ctx.fillStyle = colour; ctx.beginPath(); ctx.arc(px, py, 4, 0, 7); ctx.fill();
+  if (outlineSpan) {
+    const d = insetRect(img, u, v, outW, outH, outlineSpan), k = outW / cropW;
+    ctx.setLineDash([10, 6]); ctx.lineWidth = 2.5; ctx.strokeStyle = '#1d1f20';
+    ctx.strokeRect((d.x - r.x) * k, (d.y - r.y) * k, d.w * k, d.h * k);
+    ctx.setLineDash([]);
+  }
   if (label) {
     ctx.font = 'bold 34px "Barlow Condensed", "Arial Narrow", Arial, sans-serif';
     const w = ctx.measureText(label).width + 20, h = 44;

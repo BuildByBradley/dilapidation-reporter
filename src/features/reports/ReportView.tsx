@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { referenceNumber } from '../../lib/ids';
+import { referenceNumber, referencePrefix } from '../../lib/ids';
 import { go } from '../../app/App';
 import { fmtTime } from '../../components/ui';
 import { flushAll } from '../../data/flush';
 import * as repo from '../../data/repo';
 import { downloadBlob, inHostFrame } from '../../lib/imaging';
-import { insetBlob, planSnapshotBlob } from '../../lib/planSnapshot';
+import { DETAIL_SPAN, KEY_PLAN_SPAN, insetBlob, planSnapshotBlob } from '../../lib/planSnapshot';
 import { buildCsv, buildReportModel, draftSummary, floorSeverityMatrix, keyFindings, SEVERITIES_DESC, type ReportFinding, type ReportModel } from '../../lib/report';
 import { severityLabel, type Asset, type Project, type Severity } from '../../lib/types';
 import { SaveIndicator } from '../../components/SaveIndicator';
@@ -48,6 +48,7 @@ export function ReportView({ projectId }: { projectId: string }) {
   const [status, setStatus] = useState<Status>({ loaded: 0, total: 0, failed: [] });
   const [snaps, setSnaps] = useState<Record<string, Blob>>({});
   const [insets, setInsets] = useState<Record<string, Blob>>({});
+  const [details, setDetails] = useState<Record<string, Blob>>({});
   const [fontsReady, setFontsReady] = useState(false);
   const seen = useRef(new Set<string>());
 
@@ -67,7 +68,7 @@ export function ReportView({ projectId }: { projectId: string }) {
     if (!bundle || !model) return;
     let live = true;
     (async () => {
-      const s: Record<string, Blob> = {}, ins: Record<string, Blob> = {};
+      const s: Record<string, Blob> = {}, ins: Record<string, Blob> = {}, det: Record<string, Blob> = {};
       for (const f of model.floors) {
         if (!f.planAssetId) continue;
         const a = assets.get(f.planAssetId);
@@ -76,11 +77,15 @@ export function ReportView({ projectId }: { projectId: string }) {
         const bmp = await createImageBitmap(blob);
         try {
           s[f.id] = await planSnapshotBlob(bmp, f.findings.map((x) => ({ n: String(referenceNumber(x.reference)), u: x.u, v: x.v, colour: x.categoryColour })));
-          for (const x of f.findings) ins[x.id] = await insetBlob(bmp, x.u, x.v, x.categoryColour, x.reference);
+          for (const x of f.findings) {
+            // Key plan (the wider extract, with the detail area outlined) and a closer detail view of the same spot.
+            ins[x.id] = await insetBlob(bmp, x.u, x.v, x.categoryColour, x.reference, 720, 540, KEY_PLAN_SPAN, DETAIL_SPAN);
+            det[x.id] = await insetBlob(bmp, x.u, x.v, x.categoryColour, x.reference, 720, 540, DETAIL_SPAN);
+          }
         } finally { bmp.close(); }
         if (!live) return;
       }
-      setSnaps(s); setInsets(ins);
+      setSnaps(s); setInsets(ins); setDetails(det);
     })().catch((e) => setStatus((st) => ({ ...st, failed: [...st.failed, `Plan rendering failed: ${e instanceof Error ? e.message : String(e)}`] })));
     return () => { live = false; };
   }, [bundle, model, assets]);
@@ -88,7 +93,9 @@ export function ReportView({ projectId }: { projectId: string }) {
   // expected image count: snapshots + insets + photos
   const total = useMemo(() => {
     if (!model) return 0;
-    return model.floors.filter((f) => f.planAssetId).length + model.floors.reduce((n, f) => n + f.findings.length + f.findings.reduce((m, x) => m + x.photos.length, 0), 0);
+    // per finding: key plan + detail (on floors with a plan) and its photos
+    return model.floors.filter((f) => f.planAssetId).length
+      + model.floors.reduce((n, f) => n + (f.planAssetId ? 2 : 1) * f.findings.length + f.findings.reduce((m, x) => m + x.photos.length, 0), 0);
   }, [model]);
   const track = (ok: boolean, key: string) => {
     if (seen.current.has(key + (ok ? '+' : '-'))) return;
@@ -182,7 +189,7 @@ export function ReportView({ projectId }: { projectId: string }) {
           {model.floors.filter((f) => f.findings.length).map((f) => (
             <div key={f.id} className="floor-findings">
               <h3 className="floor-head">{f.name}</h3>
-              {f.findings.map((x) => <FindingBlock key={x.id} x={x} inset={insets[x.id]} track={track} photoLoader={photoLoader} keyed={keyedUrls.current} assets={assets} />)}
+              {f.findings.map((x) => <FindingBlock key={x.id} x={x} inset={insets[x.id]} detail={details[x.id]} track={track} photoLoader={photoLoader} keyed={keyedUrls.current} assets={assets} />)}
             </div>
           ))}
         </section>
@@ -264,8 +271,10 @@ function SeverityLabel({ severity }: { severity: Severity }) {
   return <span className={`lbl sev ${severity}`}><svg viewBox="0 0 10 10" aria-hidden="true">{icon}</svg><b>{severityLabel(severity)}</b></span>;
 }
 
-/** "Ground" → G, "Level 1" → L1, otherwise the first letters. */
-const floorBadge = (name: string) => {
+/** The floor's reference prefix (G-001 → G, L1-004 → L1); for older references, from the floor name. */
+const floorBadge = (reference: string, name: string) => {
+  const prefix = referencePrefix(reference);
+  if (prefix && prefix !== 'D') return prefix.toUpperCase().slice(0, 5);
   const m = /^level\s*(\S+)/i.exec(name.trim());
   if (m) return `L${m[1]}`.slice(0, 4).toUpperCase();
   if (/^ground/i.test(name.trim())) return 'G';
@@ -273,29 +282,33 @@ const floorBadge = (name: string) => {
 };
 
 /**
- * Photo rows on a 6-track grid: landscape photos span 3 (two per row), portrait span 2 (three per row).
- * The first row stays with the finding; later rows follow under a "continued" strip so a long set can flow to the next page.
+ * Split photos into rows of a grid with `tracks` columns, each photo taking `spanOf` of them.
+ * The first rows stay with the finding; later rows follow under a "continued" strip so a long set can flow to the next page.
  */
-function photoRows<T extends { landscape: boolean }>(photos: T[]): T[][] {
+function photoRows<T>(photos: T[], tracks: number, spanOf: (ph: T) => number): T[][] {
   const rows: T[][] = [];
   let row: T[] = [], used = 0;
   for (const ph of photos) {
-    const span = ph.landscape ? 3 : 2;
-    if (used + span > 6) { rows.push(row); row = []; used = 0; }
+    const span = spanOf(ph);
+    if (used + span > tracks) { rows.push(row); row = []; used = 0; }
     row.push(ph); used += span;
   }
   if (row.length) rows.push(row);
   return rows;
 }
 
-function FindingBlock({ x, inset, track, photoLoader, keyed, assets }: { x: ReportFinding; inset?: Blob; track: (ok: boolean, key: string) => void; photoLoader: (assetId: string) => () => Promise<Blob | undefined>; keyed: Map<string, string>; assets: Map<string, Asset> }) {
+function FindingBlock({ x, inset, detail, track, photoLoader, keyed, assets }: { x: ReportFinding; inset?: Blob; detail?: Blob; track: (ok: boolean, key: string) => void; photoLoader: (assetId: string) => () => Promise<Blob | undefined>; keyed: Map<string, string>; assets: Map<string, Asset> }) {
   const photos = x.photos.map((ph, i) => {
     const a = assets.get(ph.assetId);
     return { ...ph, n: i + 1, landscape: !a || a.width >= a.height };
   });
-  const [firstRow = [], ...moreRows] = photoRows(photos);
-  const photoFig = (ph: (typeof photos)[number]) => (
-    <figure key={ph.id} className={`report-photo ${ph.landscape ? 'l' : 'p'}`}>
+  const sideSpan = (ph: (typeof photos)[number]) => (ph.landscape || photos.length === 1 ? 2 : 1);
+  // Beside the plans: two photo tracks (landscape spans both, portrait one), at most two rows; the rest follow full width.
+  const sideRows = photoRows(photos, 2, (ph) => sideSpan(ph));
+  const firstRow = sideRows.slice(0, 2).flat();
+  const moreRows = photoRows(sideRows.slice(2).flat(), 6, (ph) => (ph.landscape ? 3 : 2));
+  const photoFig = (ph: (typeof photos)[number], span: number) => (
+    <figure key={ph.id} className={`report-photo ${ph.landscape ? 'l' : 'p'}`} style={{ gridColumn: `span ${span}` }}>
       <ReportImage id={`photo-${ph.id}`} load={photoLoader(ph.assetId)} alt={ph.caption || `${x.reference} photo ${ph.n}`} track={track} className="report-photo-img" />
       <figcaption><b>{x.reference} · Photo {ph.n}</b>{ph.caption ? ` — ${ph.caption}` : ''}</figcaption>
     </figure>
@@ -319,19 +332,29 @@ function FindingBlock({ x, inset, track, photoLoader, keyed, assets }: { x: Repo
             <div className="f-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /><path d="M12 9v4" /><path d="M12 17h.01" /></svg>Location needs review <span>— the floor plan was replaced after this pin was placed.</span></div>
           )}
           <div className="f-body">
-            <div className="f-text">
-              {x.locationNotes && <p className="loc"><b>Location</b><span className="prewrap">{x.locationNotes}</span></p>}
-              {x.description ? <p className="desc prewrap">{x.description}</p> : <p className="none">No description recorded.</p>}
-            </div>
-            <figure className="plan-x">
-              <div className="plan-frame">
-                <SnapImg blob={inset} alt={`Local plan detail for ${x.reference}`} id={`inset-${x.id}`} track={track} keyed={keyed} className="inset-img" />
-                <span className="floor-badge">{floorBadge(x.floorName)}</span>
+            <div className="f-main">
+              <div className="f-text">
+                {x.locationNotes && <p className="loc"><b>Location</b><span className="prewrap">{x.locationNotes}</span></p>}
+                {x.description ? <p className="desc prewrap">{x.description}</p> : <p className="none">No description recorded.</p>}
               </div>
-              <figcaption className="plan-cap"><span><b>Plan extract</b> · {x.floorName}</span><span>Not to scale</span></figcaption>
-            </figure>
+              {firstRow.length > 0 && <div className="f-photos side">{firstRow.map((ph) => photoFig(ph, sideSpan(ph)))}</div>}
+            </div>
+            <div className="f-plans">
+              <figure className="plan-x">
+                <div className="plan-frame">
+                  <SnapImg blob={inset} alt={`Key plan for ${x.reference}`} id={`inset-${x.id}`} track={track} keyed={keyed} className="inset-img" />
+                  <span className="floor-badge">{floorBadge(x.reference, x.floorName)}</span>
+                </div>
+                <figcaption className="plan-cap"><span><b>Key plan</b> · {x.floorName}</span><span>Not to scale</span></figcaption>
+              </figure>
+              <figure className="plan-x">
+                <div className="plan-frame">
+                  <SnapImg blob={detail} alt={`Close-up plan for ${x.reference}`} id={`detail-${x.id}`} track={track} keyed={keyed} className="inset-img" />
+                </div>
+                <figcaption className="plan-cap"><span><b>Close-up</b> · dashed area on the key plan</span><span>Not to scale</span></figcaption>
+              </figure>
+            </div>
           </div>
-          {firstRow.length > 0 && <div className="f-photos">{firstRow.map(photoFig)}</div>}
         </div>
       </article>
       {moreRows.length > 0 && (
@@ -342,7 +365,7 @@ function FindingBlock({ x, inset, track, photoLoader, keyed, assets }: { x: Repo
             <div className="f-title">{x.title}</div>
             <em>photos continued</em>
           </header>
-          <div className="f-photos">{moreRows.flat().map(photoFig)}</div>
+          <div className="f-photos">{moreRows.flat().map((ph) => photoFig(ph, ph.landscape ? 3 : 2))}</div>
         </article>
       )}
     </>

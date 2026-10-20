@@ -176,7 +176,7 @@ fieldset.warn { border: 1px solid var(--warn-line); background: var(--warn); bor
 .report .finding-block { margin: 0 0 7mm; color: var(--r-ink); font-size: 10.5pt; line-height: 1.4; }
 .report .finding-block p { margin: 0; }
 .report .finding-lead { break-inside: avoid; page-break-inside: avoid; }
-.report .finding-cont { margin-top: -4mm; }
+.report .finding-cont { margin-top: -4mm; break-inside: avoid; page-break-inside: avoid; }
 .report .f-head, .report .f-cont { display: grid; grid-template-columns: auto 1fr auto; gap: 0 4mm; align-items: center; padding: 2.5mm 4mm; border-bottom: 1px solid var(--r-ink); background: var(--r-tint); break-after: avoid; page-break-after: avoid; }
 .report .f-ref { font: 700 15pt/1 var(--r-head); letter-spacing: .02em; }
 .report .f-title { font: 600 12pt/1.15 var(--r-head); text-wrap: pretty; overflow-wrap: anywhere; }
@@ -193,12 +193,18 @@ fieldset.warn { border: 1px solid var(--warn-line); background: var(--warn); bor
 .report .sev.moderate { border-color: var(--r-ink); }
 .report .f-warn { display: flex; gap: 2mm; align-items: center; padding: 1.5mm 4mm; background: var(--r-warn-bg); border-bottom: 1px solid var(--r-warn-line); font-size: 9pt; font-weight: 600; }
 .report .f-warn svg { width: 3.5mm; height: 3.5mm; flex: none; } .report .f-warn span { font-weight: 400; color: var(--r-ink-2); }
-.report .f-body { display: grid; grid-template-columns: 1fr 60mm; gap: 4mm 5mm; padding: 3.5mm 4mm 4mm; align-items: start; }
+.report .f-body { display: grid; grid-template-columns: 1fr 72mm; gap: 4mm 5mm; padding: 3.5mm 4mm 4mm; align-items: start; }
+.report .f-main { min-width: 0; display: grid; gap: 4mm; align-content: start; }
+.report .f-plans { display: grid; gap: 3.5mm; }
+/* photos beside the plans: two tracks, images fill the column width */
+.report .f-photos.side { grid-template-columns: repeat(2, 1fr); padding: 0; }
+.report .f-photos.side .report-photo-img { width: auto; height: auto; max-width: 100%; max-height: 78mm; }
+.report .f-photos.side .report-img-placeholder { height: 60mm; }
 .report .f-text { min-width: 0; } .report .f-text p + p { margin-top: 2mm; }
 .report .f-text .loc { font-size: 9.5pt; color: var(--r-ink-2); }
 .report .f-text .loc b { font-weight: 600; color: var(--r-ink); text-transform: uppercase; font-size: 7.5pt; letter-spacing: .06em; margin-right: 1.5mm; }
 .report .f-text .none { color: var(--r-muted); font-style: italic; }
-.report .plan-x { width: 60mm; margin: 0; }
+.report .plan-x { width: 72mm; margin: 0; }
 .report .plan-frame { position: relative; border: 1px solid var(--r-ink-2); background: #fff; }
 .report .plan-frame .inset-img, .report .plan-frame .report-img-placeholder { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
 .report .floor-badge { position: absolute; left: 0; top: 0; min-width: 6mm; padding: .6mm 1.2mm; background: var(--r-ink); color: #fff; font: 700 7pt/1 var(--r-head); letter-spacing: .04em; text-align: center; }
@@ -216,6 +222,7 @@ fieldset.warn { border: 1px solid var(--warn-line); background: var(--warn); bor
 @media (max-width: 700px) {
   .report .f-head { grid-template-columns: auto 1fr; } .report .f-labels { grid-column: 1 / -1; justify-content: flex-start; margin-top: 2mm; }
   .report .f-body { grid-template-columns: 1fr; } .report .plan-x { width: 100%; max-width: 80mm; }
+  .report .f-plans { grid-template-columns: repeat(auto-fit, minmax(60mm, 1fr)); }
   .report .report-photo.l, .report .report-photo.p { grid-column: span 6; } .report .report-photo-img { height: auto; max-height: 60mm; }
 }
 @page { size: A4; margin: 12mm; }
