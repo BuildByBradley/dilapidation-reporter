@@ -14,6 +14,7 @@ import type { UV } from '../../lib/coords';
 import { createBackup } from '../../lib/backup';
 import { downloadBlob } from '../../lib/imaging';
 import { useLive } from '../../lib/useLive';
+import { RenumberDialog } from '../findings/RenumberDialog';
 import type { Asset, Category, Finding, Floor, InteractionMode, Photo, ViewerMode } from '../../lib/types';
 import { CategoriesDialog } from '../categories/CategoriesDialog';
 import { FindingEditor } from '../findings/FindingEditor';
@@ -61,6 +62,7 @@ export function Workspace({ projectId }: { projectId: string }) {
   const [magCrop, setMagCrop] = useState(120);
   const [importFor, setImportFor] = useState<string | null>(null);
   const [showCats, setShowCats] = useState(false);
+  const [showRenumber, setShowRenumber] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -227,6 +229,7 @@ export function Workspace({ projectId }: { projectId: string }) {
             <button role="menuitem" onClick={() => setShowShare(true)}>Share project…</button>
             <button role="menuitem" onClick={() => setShowDetails(true)}>Project details</button>
             <button role="menuitem" onClick={() => setShowCats(true)}>Categories</button>
+            <button role="menuitem" disabled={readOnly} onClick={() => setShowRenumber(true)}>Renumber findings…</button>
             <button role="menuitem" onClick={backup}>Back up project</button>
             <button role="menuitem" onClick={() => repo.duplicateProject(projectId).then(() => toast('ok', 'Project duplicated')).catch((e) => toast('error', String(e)))}>Duplicate project</button>
           </div>
@@ -273,6 +276,7 @@ export function Workspace({ projectId }: { projectId: string }) {
     <>
       {importFor && <ImportDialog floors={floors} startFloorId={importFor} findingCounts={counts} onClose={() => setImportFor(null)} />}
       {showCats && <CategoriesDialog projectId={projectId} onClose={() => setShowCats(false)} />}
+      {showRenumber && <RenumberDialog projectId={projectId} onClose={() => setShowRenumber(false)} />}
       {showShare && <ShareDialog projectId={projectId} projectName={project.name} onClose={() => setShowShare(false)} />}
       {showDetails && <ProjectDetails project={project} onClose={() => setShowDetails(false)} readOnly={readOnly} />}
       {discard && (

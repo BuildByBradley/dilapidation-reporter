@@ -1,6 +1,6 @@
 import { db } from './db';
 import { tracked } from './saveStatus';
-import { formatReference, nowIso, uuid } from '../lib/ids';
+import { cleanFloorCode, floorCode, formatReference, nowIso, referenceNumber, referencePrefix, uuid } from '../lib/ids';
 import { isValidUv } from '../lib/coords';
 import {
   DEFAULT_FLOOR_NAMES, FLOOR_COUNT, STARTER_CATEGORIES,
@@ -165,7 +165,23 @@ export async function listFloors(projectId: string): Promise<Floor[]> {
   const all = await db.floors.where('projectId').equals(projectId).toArray();
   return all.sort((a, b) => a.order - b.order || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
 }
-export async function updateFloor(id: string, patch: Partial<Pick<Floor, 'name' | 'displayWidth'>>): Promise<void> {
+/**
+ * Reference prefix of each floor (in floor order): its own code, or one taken from its name. Two floors never share
+ * a prefix — a repeat gets a letter (L1, L1B).
+ */
+export function floorCodes(floors: Floor[]): Map<string, string> {
+  const out = new Map<string, string>(), used = new Set<string>();
+  for (const f of floors) {
+    const base = cleanFloorCode(f.code ?? '') || floorCode(f.name);
+    let code = base;
+    for (let i = 1; used.has(code.toUpperCase()); i++) code = base + String.fromCharCode(65 + i);
+    used.add(code.toUpperCase()); out.set(f.id, code);
+  }
+  return out;
+}
+
+export async function updateFloor(id: string, patch: Partial<Pick<Floor, 'name' | 'displayWidth' | 'code'>>): Promise<void> {
+  if (patch.code !== undefined) patch = { ...patch, code: cleanFloorCode(patch.code) };
   return tracked(async () => {
     const f = await db.floors.get(id);
     if (!f) throw new RepoError('Floor not found');
@@ -285,13 +301,19 @@ export async function createFinding(input: NewFinding): Promise<Finding> {
     const project = await db.projects.get(floor.projectId);
     if (!project) throw new RepoError('Project not found');
     const t = nowIso();
+    // References run per floor: G-001, G-002… on Ground, L1-001… on Level 1. Never reused.
+    const code = floorCodes(await listFloors(project.id)).get(floor.id)!;
+    const onFloor = await db.findings.where('projectId').equals(project.id).toArray();
+    const highest = Math.max(0, ...onFloor.filter((x) => referencePrefix(x.reference).toUpperCase() === code.toUpperCase()).map((x) => referenceNumber(x.reference)));
+    const number = Math.max(floor.numberedAs === code ? floor.nextFindingNumber ?? 1 : 1, highest + 1);
     const finding: Finding = {
-      id: uuid(), projectId: project.id, floorId: floor.id, reference: formatReference(project.nextFindingNumber),
+      id: uuid(), projectId: project.id, floorId: floor.id, reference: formatReference(number, code),
       u: input.u, v: input.v, categoryId: cat.id, severity: input.severity ?? 'not_assessed', title: input.title.trim(),
       description: input.description ?? '', locationNotes: input.locationNotes ?? '', locationNeedsReview: false, createdAt: t, updatedAt: t,
     };
     await db.findings.add(finding);
-    await db.projects.update(project.id, { nextFindingNumber: project.nextFindingNumber + 1, updatedAt: t });
+    await db.floors.update(floor.id, { nextFindingNumber: number + 1, numberedAs: code });
+    await db.projects.update(project.id, { updatedAt: t });
     return finding;
   }));
 }
@@ -336,7 +358,51 @@ export async function deleteFinding(id: string): Promise<void> {
     if (f) await touch(f.projectId);
   }));
 }
-export const listFindings = (projectId: string) => db.findings.where('projectId').equals(projectId).sortBy('reference');
+/** Findings floor by floor (in floor order), then by number. */
+export async function listFindings(projectId: string): Promise<Finding[]> {
+  const [floors, findings] = await Promise.all([listFloors(projectId), db.findings.where('projectId').equals(projectId).toArray()]);
+  const rank = new Map(floors.map((f, i) => [f.id, i]));
+  return findings.sort((a, b) => (rank.get(a.floorId) ?? 1e9) - (rank.get(b.floorId) ?? 1e9) || referenceNumber(a.reference) - referenceNumber(b.reference) || a.reference.localeCompare(b.reference));
+}
+
+export type RenumberOrder = 'position' | 'captured';
+/** What renumbering would do, floor by floor (for the confirmation). */
+export async function renumberPlan(projectId: string, order: RenumberOrder): Promise<{ floor: Floor; code: string; findings: { finding: Finding; reference: string }[] }[]> {
+  const floors = await listFloors(projectId);
+  const codes = floorCodes(floors);
+  const all = await db.findings.where('projectId').equals(projectId).toArray();
+  return floors.map((floor) => {
+    const code = codes.get(floor.id)!;
+    const mine = all.filter((x) => x.floorId === floor.id);
+    if (order === 'position') {
+      // Reading order on the plan: rows top to bottom (a row is 1/20 of the plan's height), left to right in a row.
+      const row = (v: number) => Math.floor(v * 20);
+      mine.sort((a, b) => row(a.v) - row(b.v) || a.u - b.u || a.v - b.v);
+    } else {
+      mine.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || referenceNumber(a.reference) - referenceNumber(b.reference));
+    }
+    return { floor, code, findings: mine.map((finding, i) => ({ finding, reference: formatReference(i + 1, code) })) };
+  });
+}
+/**
+ * Renumber every finding per floor: G-001… on Ground, L1-001… on Level 1, in floor-list order. Each floor's next
+ * number continues after its last one. Returns how many references changed.
+ */
+export async function renumberFindings(projectId: string, order: RenumberOrder): Promise<number> {
+  return tracked(() => db.transaction('rw', [db.projects, db.floors, db.findings], async () => {
+    const plan = await renumberPlan(projectId, order);
+    const t = nowIso();
+    let changed = 0;
+    for (const { floor, code, findings } of plan) {
+      for (const { finding, reference } of findings) {
+        if (finding.reference !== reference) { await db.findings.update(finding.id, { reference, updatedAt: t }); changed++; }
+      }
+      await db.floors.update(floor.id, { nextFindingNumber: findings.length + 1, numberedAs: code, updatedAt: t });
+    }
+    await touch(projectId);
+    return changed;
+  }));
+}
 
 // ---------- categories ----------
 export const listCategories = (projectId: string) => db.categories.where('projectId').equals(projectId).sortBy('order');

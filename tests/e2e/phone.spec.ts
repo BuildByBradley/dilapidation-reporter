@@ -36,11 +36,11 @@ test('phone: left, right and top drawers open from their tabs and close again', 
   await expect(page.locator('.tab-top')).toContainText('Level 2');
   await page.locator('.tab-right').tap();
   await expect(page.locator('#drawer-right')).toBeVisible();
-  await page.getByTestId('finding-row').filter({ hasText: 'D-005' }).tap();
+  await page.getByTestId('finding-row').filter({ hasText: 'L2-001' }).tap();
   await expect(page.locator('#drawer-right')).toBeHidden();
   await expect(page.getByTestId('bottom-sheet')).toBeVisible();      // the editor lives in the bottom sheet
-  await expect(page.getByTestId('finding-editor')).toContainText('D-005');
-  await page.getByRole('button', { name: /D-005 — Lifting floor finish/ }).tap(); // collapse
+  await expect(page.getByTestId('finding-editor')).toContainText('L2-001');
+  await page.getByRole('button', { name: /L2-001 — Lifting floor finish/ }).tap(); // collapse
   await expect(page.getByTestId('finding-editor')).toHaveCount(0);
   await page.locator('.tab-top').tap();
   await expect(page.locator('#drawer-top')).toBeVisible();
@@ -63,7 +63,7 @@ test('phone: place a pin and save it from the bottom sheet', async ({ page }) =>
   await page.getByLabel('Title *').fill('Phone pin');
   await page.getByLabel('Category *').selectOption({ label: 'Cracks' });
   await page.getByRole('button', { name: 'Save finding' }).tap();
-  await expect(page.getByTestId('finding-editor')).toContainText('D-009');
+  await expect(page.getByTestId('finding-editor')).toContainText(/\b(G|L\d)-00\d/);
   expect((await dbAll(page, 'findings')).some((f) => f.title === 'Phone pin')).toBe(true);
 });
 

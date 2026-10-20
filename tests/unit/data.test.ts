@@ -71,10 +71,38 @@ describe('findings', () => {
     const { floors, cats } = await seeded();
     const mk = (t: string) => repo.createFinding({ floorId: floors[0].id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: t });
     const a = await mk('a'), b = await mk('b');
-    expect([a.reference, b.reference]).toEqual(['D-001', 'D-002']);
-    await repo.deleteFinding(a.id);
+    expect([a.reference, b.reference]).toEqual(['G-001', 'G-002']);
+    await repo.deleteFinding(b.id);
     const c = await mk('c');
-    expect(c.reference).toBe('D-003');
+    expect(c.reference).toBe('G-003'); // a deleted number is not reused
+    const l1 = await repo.createFinding({ floorId: floors[1].id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: 'up' });
+    expect(l1.reference).toBe('L1-001'); // each floor counts on its own
+  });
+  it('a floor code set by hand is used for new findings, and two floors never share a prefix', async () => {
+    const { p, floors, cats } = await seeded();
+    await repo.updateFloor(floors[4].id, { code: 'Roof' });
+    const f = await repo.createFinding({ floorId: floors[4].id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: 'r' });
+    expect(f.reference).toBe('Roof-001');
+    await repo.updateFloor(floors[3].id, { name: 'Level 1' }); // a second "Level 1"
+    const codes = repo.floorCodes(await repo.listFloors(p.id));
+    expect(codes.get(floors[1].id)).toBe('L1'); expect(codes.get(floors[3].id)).toBe('L1B');
+  });
+  it('renumbers per floor in floor order, by position on the plan or by capture order', async () => {
+    const { p, floors, cats } = await seeded();
+    const mk = (fl: number, u: number, v: number, title: string) => repo.createFinding({ floorId: floors[fl].id, u, v, categoryId: cats[0].id, title });
+    // Old-style numbers, captured out of order across floors.
+    const x = await mk(1, 0.9, 0.9, 'L1 bottom right'); const y = await mk(0, 0.8, 0.1, 'G top right');
+    const z = await mk(1, 0.1, 0.1, 'L1 top left'); const w = await mk(0, 0.1, 0.12, 'G top left');
+    let i = 0;
+    for (const f of [x, y, z, w]) await db.findings.update(f.id, { reference: `D-${String(++i).padStart(3, '0')}` });
+    await repo.moveFloor(floors[1].id, -1); // Level 1 now first in the list
+    expect(await repo.renumberFindings(p.id, 'position')).toBe(4);
+    const ref = async (id: string) => (await db.findings.get(id))!.reference;
+    expect([await ref(z.id), await ref(x.id), await ref(w.id), await ref(y.id)]).toEqual(['L1-001', 'L1-002', 'G-001', 'G-002']);
+    expect((await repo.listFindings(p.id)).map((f) => f.reference)).toEqual(['L1-001', 'L1-002', 'G-001', 'G-002']);
+    expect((await mk(0, 0.5, 0.5, 'next')).reference).toBe('G-003');
+    await repo.renumberFindings(p.id, 'captured');
+    expect([await ref(x.id), await ref(z.id), await ref(y.id), await ref(w.id)]).toEqual(['L1-001', 'L1-002', 'G-001', 'G-002']);
   });
   it('validates title, category and coordinates', async () => {
     const { floors, cats } = await seeded();

@@ -37,7 +37,10 @@ Dilapidation Inspector records building-condition ("dilapidation") inspections o
    - Step 1 Position: a zoomed view and an arrow pad move the pin one plan pixel at a time ("Bigger steps" moves 10). "Show plan to re-tap" hides the panel so you can tap a new spot.
    - Step 2 Details: title (required), category (required), severity, description, location notes.
    - Step 3 Photos (optional): Take photo or Upload photos; ✎ on a thumbnail draws on it, × removes it.
-3. Save finding (the button shows how many photos will be attached). Findings get references D-001, D-002…
+3. Save finding (the button shows how many photos will be attached).
+- Findings are numbered per floor with the floor's prefix: G-001, G-002… on Ground, L1-001… on Level 1, Roof-001… A number is never reused, even after a finding is deleted.
+- The prefix is set under each floor ("Number prefix"); left empty it comes from the floor name (Ground → G, Level 2 → L2, Roof → Roof).
+- Project ▾ → Renumber findings… renumbers every floor from 001, in floor-list order, either by position on the plan (top to bottom, left to right) or in capture order. Put the floors in order and sync other devices first; do it before a report is issued. Older projects that still have D-001 style numbers can be converted this way.
 - Severity choices: Not assessed, Minor, Moderate, Major. They are record-keeping labels, not safety ratings.
 - To edit later: select the pin (or the row in Findings). Relocate pin moves it; Delete finding removes it and its photos.
 

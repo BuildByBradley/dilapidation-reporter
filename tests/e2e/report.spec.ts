@@ -18,7 +18,7 @@ async function addBulk(page: Page, n: number) {
     const tx = db.transaction(['findings', 'photos', 'projects'], 'readwrite');
     const long = 'Long observation text that wraps across several lines to exercise pagination and overflow handling. '.repeat(6);
     for (let i = 0; i < n; i++) {
-      const num = project.nextFindingNumber + i, id = crypto.randomUUID();
+      const num = 9 + i, id = crypto.randomUUID();
       tx.objectStore('findings').add({ id, projectId: project.id, floorId: floors[i % 5].id, reference: `D-${String(num).padStart(3, '0')}`, u: ((i * 37) % 100) / 100 * 0.9 + 0.05, v: ((i * 53) % 100) / 100 * 0.9 + 0.05, categoryId: cats[i % cats.length].id, severity: ['minor', 'moderate', 'major', 'not_assessed'][i % 4], title: `BULK finding ${i + 1} <b>not html</b>`, description: `${long}END-${num}`, locationNotes: `Loc notes ${i}`, locationNeedsReview: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
       for (let k = 0; k < 2; k++) tx.objectStore('photos').add({ id: crypto.randomUUID(), findingId: id, projectId: project.id, assetId: photoAssets[(i + k) % photoAssets.length].id, caption: `BULKCAP-${num}-${k}`, order: k, isCover: k === 0, createdAt: new Date().toISOString() });
     }

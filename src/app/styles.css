@@ -382,3 +382,7 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; margin: 0; f
 /* dialogs on phones: use the visible screen height; the footer (Capture / Use photo) always stays on screen */
 @media (max-width: 600px) { .backdrop { padding: 8px; } .dialog-body { padding: 10px 12px; } }
 .sync-problems { margin: 8px 0; padding-left: 20px; } .sync-problems li { margin: 4px 0; overflow-wrap: anywhere; }
+.renumber-table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: .9rem; }
+.renumber-table th, .renumber-table td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line, #e3e3e3); }
+.renumber-table input { width: 5.5em; }
+.display-width input[aria-label$="number prefix"] { width: 5.5em; }

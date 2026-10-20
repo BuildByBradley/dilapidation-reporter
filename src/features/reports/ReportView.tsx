@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { referenceNumber } from '../../lib/ids';
 import { go } from '../../app/App';
 import { fmtTime } from '../../components/ui';
 import { flushAll } from '../../data/flush';
@@ -74,7 +75,7 @@ export function ReportView({ projectId }: { projectId: string }) {
         if (!blob) { setStatus((st) => ({ ...st, failed: [...st.failed, `Plan image for ${f.name}`] })); continue; }
         const bmp = await createImageBitmap(blob);
         try {
-          s[f.id] = await planSnapshotBlob(bmp, f.findings.map((x) => ({ n: String(parseInt(x.reference.replace(/\D/g, ''), 10)), u: x.u, v: x.v, colour: x.categoryColour })));
+          s[f.id] = await planSnapshotBlob(bmp, f.findings.map((x) => ({ n: String(referenceNumber(x.reference)), u: x.u, v: x.v, colour: x.categoryColour })));
           for (const x of f.findings) ins[x.id] = await insetBlob(bmp, x.u, x.v, x.categoryColour, x.reference);
         } finally { bmp.close(); }
         if (!live) return;
@@ -167,7 +168,7 @@ export function ReportView({ projectId }: { projectId: string }) {
                 <>
                   <SnapImg blob={snaps[f.id]} alt={`${f.name} plan with ${f.findings.length} numbered pin(s)`} id={`plan-${f.id}`} track={track} keyed={keyedUrls.current} />
                   {f.findings.length === 0 ? <p>No findings recorded.</p> : (
-                    <ol className="legend">{f.findings.map((x) => <li key={x.id} value={parseInt(x.reference.replace(/\D/g, ''), 10)}><strong>{x.reference}</strong> {x.title}{x.locationNeedsReview ? ' ⚠ location needs review' : ''}</li>)}</ol>
+                    <ol className="legend">{f.findings.map((x) => <li key={x.id} value={referenceNumber(x.reference)}><strong>{x.reference}</strong> {x.title}{x.locationNeedsReview ? ' ⚠ location needs review' : ''}</li>)}</ol>
                   )}
                 </>
               )}

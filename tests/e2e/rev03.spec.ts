@@ -16,7 +16,7 @@ test('add a floor and remove an empty one', async ({ page }) => {
 
 test('draw on a camera photo before using it; the drawing is saved in the photo', async ({ page }) => {
   await openSample(page);
-  await page.getByTestId('finding-row').filter({ hasText: 'D-003' }).click();
+  await page.getByTestId('finding-row').filter({ hasText: 'L1-001' }).click();
   const before = (await dbAll(page, 'photos')).length;
   await page.getByTestId('finding-editor').getByRole('button', { name: 'Take photo' }).click();
   await page.getByRole('button', { name: 'Capture' }).click();
@@ -85,7 +85,7 @@ test('report opens with a 1–2 page executive summary; a written summary replac
 
 test('a compact photo upload is resized to 1920 px and stored once', async ({ page }) => {
   await openSample(page);
-  await page.getByTestId('finding-row').filter({ hasText: 'D-004' }).click();
+  await page.getByTestId('finding-row').filter({ hasText: 'L1-002' }).click();
   await page.getByTestId('finding-editor').getByLabel('Upload photos').setInputFiles(demo('photo-landscape.jpg'));
   await expect.poll(async () => (await dbAll(page, 'assets')).filter((a) => a.kind === 'photo').length, { timeout: 20_000 }).toBe(7);
 });
@@ -98,4 +98,22 @@ test('a long-open tab is told when a newer version is published', async ({ page 
   await page.goto('/');
   await expect(page.getByTestId('update-banner')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId('update-banner')).toContainText('newer version');
+});
+
+test('renumber findings per floor with a prefix set in the dialog', async ({ page }) => {
+  await openSample(page);
+  await page.getByRole('button', { name: 'Project ▾' }).click();
+  await page.getByRole('menuitem', { name: 'Renumber findings…' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Renumber findings per floor' });
+  await expect(dlg).toContainText('G-001 … G-002');
+  await dlg.getByLabel('Level 4 number prefix').fill('Roof');
+  await dlg.getByLabel('Level 4 number prefix').press('Enter');
+  await expect(dlg).toContainText('Roof-001');
+  await page.screenshot({ path: 'test-results/renumber-dialog.png' });
+  await dlg.getByLabel(/In the order they were captured/).check();
+  await expect(dlg.getByRole('button', { name: 'Renumber 1 finding' })).toBeEnabled();
+  await dlg.getByRole('button', { name: 'Renumber 1 finding' }).click();
+  await expect(dlg).toBeHidden();
+  await expect(page.getByTestId('finding-row').filter({ hasText: 'Roof-001' })).toBeVisible();
+  expect((await dbAll(page, 'findings')).map((f) => f.reference).sort()).toEqual(['G-001', 'G-002', 'L1-001', 'L1-002', 'L2-001', 'L2-002', 'L3-001', 'Roof-001']);
 });

@@ -125,7 +125,7 @@ test.describe('pins (A09, A10)', () => {
     await tap(page, p.x, p.y - 12);
     await expect(page.getByRole('dialog', { name: 'Choose finding' })).toContainText('2 findings overlap');
     await page.getByRole('dialog', { name: 'Choose finding' }).getByRole('button', { name: /Second/ }).click();
-    await expect(page.getByTestId('finding-editor')).toContainText('D-002');
+    await expect(page.getByTestId('finding-editor')).toContainText('G-002');
   });
 
   test('Escape cancels placement; switching floors with drafted content asks first', async ({ page }) => {

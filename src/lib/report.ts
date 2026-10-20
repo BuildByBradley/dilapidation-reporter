@@ -1,3 +1,4 @@
+import { referenceNumber } from './ids';
 import { csvRow } from './csv';
 import { severityLabel, SEVERITIES, type Severity } from './types';
 import type { ProjectBundle } from '../data/repo';
@@ -24,7 +25,7 @@ export function buildReportModel(b: ProjectBundle): ReportModel {
   const cats = new Map(b.categories.map((c) => [c.id, c]));
   const floors = [...b.floors].sort((a, c) => a.order - c.order);
   const outFloors: ReportFloor[] = floors.map((f) => {
-    const findings = b.findings.filter((x) => x.floorId === f.id).sort((x, y) => x.reference.localeCompare(y.reference, undefined, { numeric: true }))
+    const findings = b.findings.filter((x) => x.floorId === f.id).sort((x, y) => referenceNumber(x.reference) - referenceNumber(y.reference) || x.reference.localeCompare(y.reference, undefined, { numeric: true }))
       .map((x): ReportFinding => ({
         id: x.id, reference: x.reference, title: x.title, categoryName: cats.get(x.categoryId)?.name ?? 'Unknown category',
         categoryColour: cats.get(x.categoryId)?.colour ?? '#555', severity: x.severity, description: x.description,
@@ -67,7 +68,7 @@ const listJoin = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0,
 export function keyFindings(model: ReportModel, includeMinor = false): ReportFinding[] {
   return model.floors.flatMap((f) => f.findings)
     .filter((f) => f.severity === 'major' || f.severity === 'moderate' || includeMinor)
-    .sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity] || a.reference.localeCompare(b.reference, undefined, { numeric: true }));
+    .sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity]); // stable: floor order, then reference, within a severity
 }
 
 /** Severities most serious first, for client-facing tables. */

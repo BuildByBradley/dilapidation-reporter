@@ -25,7 +25,7 @@ async function seeded() {
 describe('executive summary', () => {
   it('key findings: major first, then moderate; minor and unassessed left out', async () => {
     const { model } = await seeded();
-    expect(keyFindings(model).map((f) => `${f.reference} ${f.severity}`)).toEqual(['D-002 major', 'D-004 major', 'D-001 moderate']);
+    expect(keyFindings(model).map((f) => `${f.reference} ${f.severity}`)).toEqual(['G-002 major', 'L1-002 major', 'G-001 moderate']);
   });
   it('floor × severity matrix counts each floor', async () => {
     const { model } = await seeded();
@@ -39,7 +39,7 @@ describe('executive summary', () => {
     expect(t).toContain('B. Brits inspected 14 Hartley Street on 2026-10-16');
     expect(t).toContain('5 conditions were recorded across 2 floors (Ground and Level 1)');
     expect(t).toContain('2 are rated major, 1 moderate and 1 minor; 1 has not been assessed');
-    expect(t).toContain('Major items: D-002 rising damp (Ground) and D-004 cracked tile (Level 1).');
+    expect(t).toContain('Major items: G-002 rising damp (Ground) and L1-002 cracked tile (Level 1).');
     expect(t).toContain('not a structural assessment');
   });
   it('the written summary survives a backup round trip', async () => {

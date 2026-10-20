@@ -20,6 +20,10 @@ export type Floor = {
   id: string; projectId: string; name: string; order: number;
   planAssetId?: string; displayWidth: number;
   sourcePage?: number; createdAt: string; updatedAt: string;
+  /** Prefix of this floor's finding references (G-001, L1-001, Roof-001). Empty: taken from the floor name. */
+  code?: string;
+  /** Next finding number on this floor, for references starting `numberedAs` (a new prefix starts again at 1). */
+  nextFindingNumber?: number; numberedAs?: string;
 };
 export type Finding = {
   id: string; projectId: string; floorId: string; reference: string;
