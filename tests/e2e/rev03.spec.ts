@@ -60,23 +60,23 @@ test('draw on a camera photo before using it; the drawing is saved in the photo'
   expect(Math.max(res.w, res.h)).toBeLessThanOrEqual(1920);
 });
 
-test('report opens with a 1–2 page executive summary; a written summary replaces the draft', async ({ page }) => {
+test('report opens with a summary page; a written summary replaces the draft', async ({ page }) => {
   await openSample(page);
   const pid = /#\/p\/([^/]+)/.exec(page.url())![1];
   await page.goto(`/#/p/${pid}/report`);
   await expect(page.getByTestId('report-status')).toHaveText('Ready to print', { timeout: 60_000 });
   const exec = page.getByTestId('exec-summary');
-  await expect(exec).toContainText('Executive summary');
+  await expect(exec.locator('h2')).toContainText('Summary');
   await expect(exec).toContainText('Summary generated automatically');
-  await expect(exec.locator('.exec-key tbody tr').first()).toBeVisible();
+  await expect(exec.locator('.summary-grid table')).toHaveCount(2); // by floor, by category
   await exec.screenshot({ path: 'test-results/exec-summary.png' });
   // write one in Project details
   await page.goto(`/#/p/${pid}`);
   await page.getByRole('button', { name: /Project/ }).first().click();
   await page.getByRole('menuitem', { name: /Project details/ }).or(page.getByRole('button', { name: /Project details/ })).first().click();
   await page.getByRole('button', { name: 'Draft from findings' }).click();
-  await expect(page.getByLabel(/Executive summary/)).toHaveValue(/conditions were recorded/);
-  await page.getByLabel(/Executive summary/).fill('Overall fair. Two items need attention before handover.');
+  await expect(page.getByLabel(/Report summary/)).toHaveValue(/conditions were recorded/);
+  await page.getByLabel(/Report summary/).fill('Overall fair. Two items need attention before handover.');
   await page.getByRole('dialog').getByRole('button', { name: 'Save' }).click();
   await page.goto(`/#/p/${pid}/report`);
   await expect(page.getByTestId('exec-text')).toHaveText('Overall fair. Two items need attention before handover.');

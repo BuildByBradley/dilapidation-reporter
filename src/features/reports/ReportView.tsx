@@ -6,7 +6,7 @@ import { flushAll } from '../../data/flush';
 import * as repo from '../../data/repo';
 import { downloadBlob, inHostFrame } from '../../lib/imaging';
 import { DETAIL_SPAN, KEY_PLAN_SPAN, insetBlob, planSnapshotBlob } from '../../lib/planSnapshot';
-import { buildCsv, buildReportModel, draftSummary, floorSeverityMatrix, keyFindings, SEVERITIES_DESC, type ReportFinding, type ReportModel } from '../../lib/report';
+import { buildCsv, buildReportModel, draftSummary, type ReportFinding, type ReportModel } from '../../lib/report';
 import { severityLabel, type Asset, type Project, type Severity } from '../../lib/types';
 import { SaveIndicator } from '../../components/SaveIndicator';
 
@@ -110,7 +110,6 @@ export function ReportView({ projectId }: { projectId: string }) {
   if (!bundle || !model) return <div className="page"><main className="content"><p role="status">Preparing report…</p></main></div>;
   const p = bundle.project;
   const photoLoader = (assetId: string) => async () => { const a = assets.get(assetId); return a ? bundle.blobs.get(a.displayBlobId) : undefined; };
-  const sev = model.bySeverity;
 
   return (
     <div className="report-page">
@@ -128,8 +127,7 @@ export function ReportView({ projectId }: { projectId: string }) {
       {status.failed.length > 0 && <div className="banner warn no-print" role="alert">This report is incomplete and should not be issued: {status.failed.slice(0, 5).join('; ')}.</div>}
       <article className="report" data-testid="report">
         <header className="cover">
-          <p className="eyebrow">Prototype inspection record</p>
-          <h1>Dilapidation Inspection Report</h1>
+          <h1>As built Inspection Report (Draft)</h1>
           <h2>{p.name}</h2>
           <dl className="meta">
             <dt>Reference</dt><dd>{p.reference || '—'}</dd>
@@ -145,26 +143,12 @@ export function ReportView({ projectId }: { projectId: string }) {
 
         <ExecutiveSummary model={model} project={p} />
 
-        <section>
-          <h2>Project notes and scope</h2>
-          <p className="prewrap">{p.notes || 'No general notes recorded.'}</p>
-          <p><strong>Scope of this report:</strong> the whole project — all {model.floors.length} floors and all {model.total} recorded finding{model.total === 1 ? '' : 's'}, regardless of any filters applied in the workspace.</p>
-          <p className="small muted">This document records observations made by the inspector. It does not certify the safety or structural condition of the building. Severity labels are record-keeping categories, not safety determinations. Pin positions are positions on the supplied drawings, not surveyed measurements.</p>
-        </section>
-
-        <section>
-          <h2>Summary</h2>
-          <div className="summary-grid">
-            <table><caption>By floor</caption><tbody>{model.byFloor.map((r) => <tr key={r.floor}><th scope="row">{r.floor}</th><td>{r.count}</td></tr>)}<tr className="total"><th scope="row">Total</th><td>{model.total}</td></tr></tbody></table>
-            <table><caption>By category</caption><tbody>{model.byCategory.length ? model.byCategory.map((r) => <tr key={r.category}><th scope="row">{r.category}</th><td>{r.count}</td></tr>) : <tr><td colSpan={2}>None</td></tr>}</tbody></table>
-            <table><caption>By severity</caption><tbody>{sev.map((r) => <tr key={r.severity}><th scope="row">{r.label}</th><td>{r.count}</td></tr>)}</tbody></table>
-          </div>
-          {model.needsReview.length > 0 && (
-            <div className="warn-box" data-testid="report-review-warning">
-              <strong>Location review required for {model.needsReview.length} finding(s)</strong> — the floor plan was replaced after the pin was placed: {model.needsReview.map((f) => f.reference).join(', ')}.
-            </div>
-          )}
-        </section>
+        {p.notes.trim() && (
+          <section>
+            <h2>Project notes</h2>
+            <p className="prewrap">{p.notes}</p>
+          </section>
+        )}
 
         <section>
           <h2>Floor plans</h2>
@@ -184,7 +168,7 @@ export function ReportView({ projectId }: { projectId: string }) {
         </section>
 
         <section>
-          <h2 className="findings-title">Findings <small>Positions are positions on the supplied drawings, not surveyed measurements.</small></h2>
+          <h2 className="findings-title">Findings <small>Positions are indicative on the supplied drawings, not surveyed measurements.</small></h2>
           {model.total === 0 && <p>No findings recorded.</p>}
           {model.floors.filter((f) => f.findings.length).map((f) => (
             <div key={f.id} className="floor-findings">
@@ -193,7 +177,7 @@ export function ReportView({ projectId }: { projectId: string }) {
             </div>
           ))}
         </section>
-        <footer className="report-foot small muted">Dilapidation Inspector — prototype inspection record. Generated {fmtTime(new Date().toISOString())}.</footer>
+        <footer className="report-foot small muted">{p.name} — As built Inspection Report (Draft). Generated {fmtTime(new Date().toISOString())}.</footer>
       </article>
     </div>
   );
@@ -210,51 +194,25 @@ function SnapImg({ blob, alt, id, track, keyed, className }: { blob?: Blob; alt:
   return <img className={className ?? 'plan-img'} src={url} alt={alt} decoding="sync" onLoad={() => track(true, id)} onError={() => track(false, id)} />;
 }
 
-/** Rows in the key-findings table: enough to fill about one page, so the summary stays at 1–2 pages. */
-const KEY_ROWS = 25;
 
-/** The pages a client reads first: the inspector's overview, the numbers, and the major/moderate findings. */
+/** The page a client reads first: the inspector's summary and the findings per floor and per category. */
 function ExecutiveSummary({ model, project }: { model: ReportModel; project: Project }) {
   const written = project.summary?.trim();
   const text = written || draftSummary(model, project);
-  const key = keyFindings(model);
-  const shown = key.slice(0, KEY_ROWS), rest = key.slice(KEY_ROWS);
-  const restMajor = rest.filter((f) => f.severity === 'major').length;
-  const matrix = floorSeverityMatrix(model);
-  const sevCount = new Map(model.bySeverity.map((s) => [s.severity, s.count]));
   const photos = model.floors.reduce((n, f) => n + f.findings.reduce((m, x) => m + x.photos.length, 0), 0);
   return (
     <section className="exec" data-testid="exec-summary">
-      <h2 className="findings-title">Executive summary <small>{model.total} findings · {model.floors.filter((f) => f.hasPlan).length} floors · {photos} photos</small></h2>
+      <h2 className="findings-title">Summary <small>{model.total} findings · {model.floors.filter((f) => f.hasPlan).length} floors · {photos} photos</small></h2>
       <p className="prewrap exec-text" data-testid="exec-text">{text}</p>
       {!written && <p className="small muted exec-auto">Summary generated automatically from the recorded findings. The inspector can edit it under Project details.</p>}
-      <div className="sev-strip" aria-label="Findings by severity">
-        {(['major', 'moderate', 'minor', 'not_assessed'] as Severity[]).map((s) => (
-          <div key={s} className={`sev-tile ${s}`}><span className="n">{sevCount.get(s) ?? 0}</span><SeverityLabel severity={s} /></div>
-        ))}
+      <div className="summary-grid">
+        <table><caption>By floor</caption><tbody>{model.byFloor.map((r) => <tr key={r.floor}><th scope="row">{r.floor}</th><td>{r.count}</td></tr>)}<tr className="total"><th scope="row">Total</th><td>{model.total}</td></tr></tbody></table>
+        <table><caption>By category</caption><tbody>{model.byCategory.length ? model.byCategory.map((r) => <tr key={r.category}><th scope="row">{r.category}</th><td>{r.count}</td></tr>) : <tr><td colSpan={2}>None</td></tr>}</tbody></table>
       </div>
-      {matrix.length > 0 && (
-        <table className="exec-matrix">
-          <caption>Findings by floor and severity</caption>
-          <thead><tr><th scope="col">Floor</th>{SEVERITIES_DESC.map((s) => <th key={s.value} scope="col">{s.label}</th>)}<th scope="col">Total</th></tr></thead>
-          <tbody>
-            {matrix.map((r) => <tr key={r.floor}><th scope="row">{r.floor}</th>{r.counts.map((c, i) => <td key={i} className={c ? '' : 'zero'}>{c || '–'}</td>)}<td><b>{r.total}</b></td></tr>)}
-            <tr className="total"><th scope="row">Total</th>{SEVERITIES_DESC.map((s) => <td key={s.value}>{sevCount.get(s.value) ?? 0}</td>)}<td>{model.total}</td></tr>
-          </tbody>
-        </table>
-      )}
-      <h3 className="exec-h">Key findings <small>major and moderate, in order of severity</small></h3>
-      {key.length === 0 ? <p>No major or moderate findings were recorded.</p> : (
-        <table className="exec-key">
-          <thead><tr><th scope="col">Ref</th><th scope="col">Floor</th><th scope="col">Finding</th><th scope="col">Category</th><th scope="col">Severity</th></tr></thead>
-          <tbody>
-            {shown.map((f) => (
-              <tr key={f.id}><td className="ref">{f.reference}</td><td>{f.floorName}</td><td>{f.title}{f.locationNeedsReview ? ' ⚠' : ''}</td>
-                <td><span className="sw" style={{ background: f.categoryColour }} aria-hidden="true" /> {f.categoryName}</td><td><SeverityLabel severity={f.severity} /></td></tr>
-            ))}
-            {rest.length > 0 && <tr className="more"><td colSpan={5}>+ {rest.length} further {restMajor ? `findings (${restMajor} major)` : 'moderate findings'} — see the Findings section for every item.</td></tr>}
-          </tbody>
-        </table>
+      {model.needsReview.length > 0 && (
+        <div className="warn-box" data-testid="report-review-warning">
+          <strong>Location review required for {model.needsReview.length} finding(s)</strong> — the floor plan was replaced after the pin was placed: {model.needsReview.map((f) => f.reference).join(', ')}.
+        </div>
       )}
     </section>
   );

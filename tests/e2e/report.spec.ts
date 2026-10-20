@@ -40,11 +40,11 @@ test('A19 full report ignores workspace filters and matches stored data; escapes
   await expect(page.locator('.report-photo')).toHaveCount(photos.length);
   const text = await page.getByTestId('report').innerText();
   for (const f of findings) { expect(text).toContain(f.reference); expect(text).toContain(f.title); }
-  expect(text).toContain('regardless of any filters');
-  expect(text).toMatch(/prototype inspection record/i);
+  expect(text).toMatch(/As built Inspection Report \(Draft\)/);
+  expect(text).not.toMatch(/prototype inspection record|regardless of any filters|No general notes|Key findings|By severity/i);
   expect(text).toContain('Floor plans');
-  // summary counts derived from data: 8 findings, 2 major
-  await expect(page.locator('.summary-grid table').nth(2).locator('tr', { hasText: 'Major' })).toContainText('2');
+  // summary counts derived from data: 8 findings, by floor and by category only
+  await expect(page.locator('.summary-grid table')).toHaveCount(2);
   await expect(page.locator('.summary-grid table').first().locator('tr.total')).toContainText('8');
   // every floor has a plan figure with its pins
   await expect(page.locator('.plan-img')).toHaveCount(5);
@@ -90,8 +90,7 @@ test('A20 printing a long report: legible pages, no clipped content, workspace c
   expect(pages).toBeGreaterThan(10);
   expect(info1).toMatch(/A4|595\.\d+ x 841\.\d+/);
   const txt = execFileSync('pdftotext', ['-layout', pdfPath, '-']).toString();
-  expect(txt).toMatch(/dilapidation inspection report/i);
-  expect(txt).toMatch(/prototype inspection record/i);
+  expect(txt).toMatch(/As built Inspection Report \(Draft\)/);
   expect(txt).not.toMatch(/Print \/ Save as PDF|Export findings CSV|Back to inspection/); // toolbar is not printed
   const flat = txt.replace(/\s+/g, ' ');
   for (let i = 0; i < 40; i++) { const n = 9 + i; expect(flat, `finding D-${n}`).toContain(`END-${n}`); }

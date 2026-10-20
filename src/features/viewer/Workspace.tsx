@@ -380,7 +380,7 @@ function ProjectDetails({ project, onClose, readOnly }: { project: ProjectT; onC
         <label>Inspection date<input type="date" value={d.inspectionDate} onChange={set('inspectionDate')} /></label>
         <label>Reference<input value={d.reference} onChange={set('reference')} /></label>
         <label className="span2">Notes<textarea rows={3} value={d.notes} onChange={set('notes')} /></label>
-        <label className="span2">Executive summary <span className="muted small">(first pages of the report — what the client reads first)</span>
+        <label className="span2">Report summary <span className="muted small">(the Summary page of the report — what the client reads first)</span>
           <textarea rows={7} value={d.summary} onChange={set('summary')} placeholder="Overall condition, the main issues and what needs attention. Use “Draft from findings” for a first version." />
         </label>
         <div className="span2 row"><button type="button" disabled={readOnly} onClick={() => void draft().catch((e) => toast('error', String(e)))}>Draft from findings</button><span className="small muted">Builds a neutral first draft from the recorded findings; edit it before issuing.</span></div>

@@ -5,7 +5,7 @@
 export const HELP_GUIDE = `# Dilapidation Inspector — user guide
 
 ## What the app is for
-Dilapidation Inspector records building-condition ("dilapidation") inspections on floor plans: import the plans, drop pins where defects are, describe and photograph them, and produce a printable report. It records observations; it does not certify safety, diagnose structural causes or measure anything. Pin positions are positions on the supplied drawings, not surveyed measurements.
+Dilapidation Inspector records building-condition ("dilapidation") inspections on floor plans: import the plans, drop pins where defects are, describe and photograph them, and produce a printable report. It records observations; it does not certify safety, diagnose structural causes or measure anything. Pin positions are indicative on the supplied drawings, not surveyed measurements.
 
 ## Opening the app and installing it on a phone
 - The app is a web page: https://buildbybradley.github.io/dilapidation-reporter/
@@ -15,7 +15,7 @@ Dilapidation Inspector records building-condition ("dilapidation") inspections o
 ## Projects
 - Projects page: New inspection (name, site, address, client, inspector, date, reference, notes), Restore backup, Load sample project (invented demo data).
 - Each project card: Open, Rename / details, Duplicate, Back up, Delete (or Leave for projects shared with you).
-- Project details (inside a project: Project ▾ → Project details) also holds the Executive summary text for the report.
+- Project details (inside a project: Project ▾ → Project details) also holds the Report summary text (the report's Summary page).
 
 ## Floors and plans
 - A new project starts with five floors (Ground, Level 1–4). "+ Add floor" under the floor list adds Level 5, 6…; "Remove" appears on floors without findings.
@@ -59,8 +59,8 @@ Dilapidation Inspector records building-condition ("dilapidation") inspections o
 
 ## The report
 - Report (top bar) builds the full report from all findings, whatever filters are set in the workspace.
-- Order: cover page; Executive summary (1–2 pages: the inspector's summary text, counts by severity, a floor × severity table, and key major/moderate findings); notes and scope; summary tables; a page per floor plan with numbered pins; then every finding with its plan extract and photos.
-- Write the executive summary in Project ▾ → Project details. "Draft from findings" writes a neutral first draft to edit. If it is left empty, the report uses an automatic draft and says so.
+- Order: cover page ("As built Inspection Report (Draft)"); Summary (the inspector's summary text and tables of findings by floor and by category); project notes (only if written); a page per floor plan with numbered pins; then every finding: description and photos on the left, key plan and a close-up plan on the right.
+- Write the summary in Project ▾ → Project details (Report summary). "Draft from findings" writes a neutral first draft to edit. If it is left empty, the report uses an automatic draft and says so.
 - Print / Save as PDF opens the browser's print dialog — choose "Save as PDF". Wait for "Ready to print". Export findings CSV gives a spreadsheet of all findings.
 
 ## Sync between phone and computer (cloud)
