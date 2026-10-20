@@ -67,6 +67,22 @@ describe('projects and floors', () => {
 });
 
 describe('findings', () => {
+  it('copies a finding to other floors with its details, position and photos; deleting the original keeps the copies’ photos', async () => {
+    const { floors, cats } = await seeded();
+    const src = await repo.createFinding({ floorId: floors[1].id, u: 0.31, v: 0.62, categoryId: cats[2].id, title: 'Wall finish', severity: 'minor', description: 'Not applied', locationNotes: 'Plant room' });
+    await repo.addPhoto(src.id, img('a.png'), 'first'); await repo.addPhoto(src.id, img('b.png'), 'second');
+    const copies = await repo.copyFindingToFloors(src.id, [floors[2].id, floors[3].id]);
+    expect(copies.map((c) => c.reference)).toEqual(['L2-001', 'L3-001']);
+    for (const c of copies) {
+      expect(c).toMatchObject({ u: 0.31, v: 0.62, categoryId: cats[2].id, title: 'Wall finish', severity: 'minor', description: 'Not applied', locationNotes: 'Plant room' });
+      const ph = await repo.listPhotos(c.id);
+      expect(ph.map((p) => [p.caption, p.isCover])).toEqual([['first', true], ['second', false]]);
+    }
+    await repo.deleteFinding(src.id);
+    const ph = await repo.listPhotos(copies[0].id);
+    const asset = await db.assets.get(ph[0].assetId);
+    expect(asset && (await db.blobs.get(asset.displayBlobId))).toBeTruthy(); // shared image kept for the copies
+  });
   it('allocates monotonic references and never renumbers', async () => {
     const { floors, cats } = await seeded();
     const mk = (t: string) => repo.createFinding({ floorId: floors[0].id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: t });

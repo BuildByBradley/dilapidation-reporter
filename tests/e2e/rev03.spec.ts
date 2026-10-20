@@ -224,3 +224,22 @@ test('add a new category straight from a finding’s category list', async ({ pa
   await page.getByTestId('finding-editor').getByLabel('Category').selectOption({ label: '+ New category…' });
   await expect(page.getByTestId('finding-editor').getByLabel('Category').locator('option:checked')).toHaveText('Lift doors');
 });
+
+test('copy a finding to other floors from the finding editor', async ({ page }) => {
+  await openSample(page);
+  await page.getByTestId('finding-row').filter({ hasText: 'L1-001' }).click();
+  await page.getByRole('button', { name: 'Copy to floor…' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Copy L1-001 to other floors' });
+  await expect(dlg.getByLabel('Level 1')).toHaveCount(0); // not its own floor
+  await dlg.getByLabel('Level 2').check(); await dlg.getByLabel('Level 4').check();
+  await dlg.getByRole('button', { name: 'Copy to 2 floors' }).click();
+  await expect(dlg).toBeHidden();
+  const all = await dbAll(page, 'findings');
+  const src = all.find((f) => f.reference === 'L1-001')!;
+  for (const ref of ['L2-003', 'L4-002']) {
+    const c = all.find((f) => f.reference === ref)!;
+    expect(c).toMatchObject({ title: src.title, u: src.u, v: src.v, categoryId: src.categoryId, severity: src.severity });
+    expect((await dbAll(page, 'photos')).filter((p) => p.findingId === c.id).length).toBe((await dbAll(page, 'photos')).filter((p) => p.findingId === src.id).length);
+  }
+  await expect(page.getByTestId('finding-row').filter({ hasText: 'L4-002' })).toBeVisible();
+});

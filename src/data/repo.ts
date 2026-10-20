@@ -358,6 +358,29 @@ export async function deleteFinding(id: string): Promise<void> {
     if (f) await touch(f.projectId);
   }));
 }
+/**
+ * Copy a finding to other floors: same position on the plan, title, category, severity, description, notes and
+ * photos (captions, order, cover). Each copy gets the next number on its floor. The photo images are shared, not
+ * duplicated, so copies cost no extra storage or upload; editing a copy's photos later does not affect the original.
+ */
+export async function copyFindingToFloors(findingId: string, floorIds: string[]): Promise<Finding[]> {
+  return tracked(() => db.transaction('rw', [db.projects, db.floors, db.findings, db.categories, db.photos], async () => {
+    const src = await db.findings.get(findingId);
+    if (!src) throw new RepoError('Finding not found');
+    const photos = await listPhotos(findingId);
+    const out: Finding[] = [];
+    for (const floorId of floorIds) {
+      const floor = await db.floors.get(floorId);
+      if (!floor || floor.projectId !== src.projectId) throw new RepoError('Floor not found');
+      const copy = await createFinding({ floorId, u: src.u, v: src.v, categoryId: src.categoryId, title: src.title, severity: src.severity,
+        description: src.description, locationNotes: src.locationNotes });
+      const t = nowIso();
+      await db.photos.bulkAdd(photos.map((p) => ({ ...p, id: uuid(), findingId: copy.id, createdAt: t })));
+      out.push(copy);
+    }
+    return out;
+  }));
+}
 /** Findings floor by floor (in floor order), then by number. */
 export async function listFindings(projectId: string): Promise<Finding[]> {
   const [floors, findings] = await Promise.all([listFloors(projectId), db.findings.where('projectId').equals(projectId).toArray()]);

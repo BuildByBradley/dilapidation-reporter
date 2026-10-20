@@ -395,3 +395,4 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; margin: 0; f
   background-size: 33.333% 33.333%; background-position: -1px -1px; }
 .crop-zoom input { width: 140px; }
 .pending-photos .thumb-open { padding: 0; border: 0; background: none; min-height: 0; display: block; }
+.copy-floors { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 6px; } .copy-floors label { min-height: 36px; align-items: center; }

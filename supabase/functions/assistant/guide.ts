@@ -43,6 +43,7 @@ Dilapidation Inspector records building-condition ("dilapidation") inspections o
 - Project ▾ → Renumber findings… renumbers every floor from 001, in floor-list order, either by position on the plan (top to bottom, left to right) or in capture order. Put the floors in order and sync other devices first; do it before a report is issued. Older projects that still have D-001 style numbers can be converted this way.
 - Severity choices: Not assessed, Minor, Moderate, Major. They are record-keeping labels, not safety ratings.
 - To edit later: select the pin (or the row in Findings). Relocate pin moves it; Delete finding removes it and its photos.
+- Copy to floor… (in the finding) copies it to the floors you tick: same spot on each plan, title, category, severity, description, location notes and photos; each copy gets the next number on its floor (e.g. L2-046). Photos are shared, so copies use no extra storage. Use Relocate pin on a copy if that floor's layout differs.
 
 ## Photos
 - Take photo uses the camera inside the app: Capture → Retake / ✎ Draw on photo / Use photo. Drawing tools: pen, circle, arrow; red, yellow, white, black; thin or thick; Undo and Clear. The drawing is saved into the photo.
