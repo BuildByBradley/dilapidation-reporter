@@ -16,6 +16,8 @@ class FakeCloud {
   refuseRecord: (r: RecordRow) => string | null = () => null;
   /** Simulated signal drops: the next N uploads fail with a network error. */
   drops = 0;
+  /** Download latency (ms) and the most downloads seen running at once. */
+  downloadMs = 0; downloading = 0; maxDownloading = 0;
   remote(): Remote {
     const self = this; // eslint-disable-line @typescript-eslint/no-this-alias
     const check = () => { if (!self.online) throw new Error('network down'); };
@@ -38,7 +40,13 @@ class FakeCloud {
         const why = self.refuseBlob(id); if (why) throw new Error(why);
         self.files.set(id, b);
       },
-      async downloadBlob(id) { check(); return self.files.get(id) ?? null; },
+      async downloadBlob(id) {
+        check();
+        self.downloading++; self.maxDownloading = Math.max(self.maxDownloading, self.downloading);
+        if (self.downloadMs) await new Promise((r) => setTimeout(r, self.downloadMs));
+        self.downloading--;
+        return self.files.get(id) ?? null;
+      },
       async deleteBlobs(items) { check(); items.forEach((x) => self.files.delete(x.id)); },
       subscribe(on, onLive) { self.subs.add(on); onLive(true); return () => self.subs.delete(on); },
     };
@@ -295,4 +303,33 @@ describe('phone → PC live sync', () => {
     expect(cloud.records.get(`projects:${p.id}`)).toBeTruthy();
     phone.stop();
   }, 15000);
+
+  it('a device catching up downloads files several at a time and reports how many are left', async () => {
+    const phone = device('phone');
+    const p = await on(phone.db, async () => {
+      const p = await repo.createProject({ name: 'Many photos' });
+      const [floor] = await repo.listFloors(p.id);
+      await repo.setFloorPlan(floor.id, img(1));
+      const cats = await repo.listCategories(p.id);
+      for (let i = 0; i < 6; i++) {
+        const f = await repo.createFinding({ floorId: floor.id, u: 0.1 + i / 10, v: 0.5, categoryId: cats[0].id, title: `F${i}` });
+        for (let k = 0; k < 3; k++) await repo.addPhoto(f.id, img(10 + i * 3 + k));
+      }
+      return p;
+    });
+    await phone.engine.start(); await settle(phone.engine);
+    cloud.downloadMs = 40;
+    const statuses: SyncStatus[] = [];
+    const pcDb = new InspectorDb(`sync-pc-${++n}`); dbs.push(pcDb);
+    const pc = new SyncEngine(pcDb, cloud.remote(), 'pc-z', (st) => statuses.push(st), () => cloud.online, 0, false);
+    const t0 = Date.now();
+    await pc.start(); await pc.syncNow(); await pc.idle();
+    const files = (await phone.db.blobs.count());
+    expect(await pcDb.blobs.count()).toBe(files);
+    expect(cloud.maxDownloading).toBeGreaterThan(3);
+    expect(Date.now() - t0).toBeLessThan(files * 40 * 0.6); // well under one-by-one time
+    expect(statuses.some((st) => st.kind === 'syncing' && st.pending > 10)).toBe(true);
+    expect((await pcDb.photos.where('projectId').equals(p.id).count())).toBe(18);
+    phone.engine.stop(); pc.stop();
+  });
 });

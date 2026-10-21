@@ -70,6 +70,8 @@ const MISSING = 'missingBlobs';
 const LAST_SYNC = 'lastSync';
 /** Re-read a little before the cursor: a transaction can commit after a later one started. Applying is idempotent. */
 const CURSOR_OVERLAP_MS = 2 * 60 * 1000;
+/** Parallel file downloads: enough to hide the round trip to the cloud, few enough for a phone on mobile data. */
+const DOWNLOADS_AT_ONCE = 6;
 /**
  * Plain-language reason for a failed cloud call. Kept short: it is shown on a phone.
  */
@@ -218,6 +220,9 @@ export class SyncEngine {
     const rows = await this.remote.fetchSince(since);
     await this.enqueue(() => this.retryMissing());
     if (!rows.length) return;
+    // Files first, several at a time (one by one, a project with hundreds of photos takes many minutes on a phone).
+    await this.prefetchBlobs(rows.filter((r) => r.kind === 'assets' && !r.deleted && r.data && r.device !== this.device)
+      .flatMap((r) => assetBlobIds(r.data as Asset).map((id) => ({ id, projectId: (r.data as Asset).projectId }))));
     // Parents before children; deletions after everything, children first.
     const ordered = [...rows].sort((a, b) =>
       Number(a.deleted) - Number(b.deleted)
@@ -285,6 +290,36 @@ export class SyncEngine {
     await this.setMissing(id, null);
   }
 
+  /**
+   * Download files this device does not have yet, DOWNLOADS_AT_ONCE at a time, reporting progress. Files that are not
+   * in the cloud yet, or fail, are left for the usual one-by-one path (which records and retries them).
+   */
+  private async prefetchBlobs(items: { id: string; projectId: string }[]) {
+    const ids = new Set<string>();
+    const todo: { id: string; projectId: string }[] = [];
+    for (const it of items) {
+      if (ids.has(it.id)) continue;
+      ids.add(it.id);
+      if (!(await this.db.blobs.get(it.id))) todo.push(it);
+    }
+    if (!todo.length) return;
+    let left = todo.length;
+    const work = [...todo];
+    this.report({ kind: 'syncing', pending: left });
+    await Promise.all(Array.from({ length: DOWNLOADS_AT_ONCE }, async () => {
+      for (let it = work.shift(); it && !this.stopped; it = work.shift()) {
+        try {
+          const data = await withRetry(() => this.remote.downloadBlob(it.id, it.projectId));
+          if (data) {
+            await this.db.blobs.put({ id: it.id, projectId: it.projectId, data });
+            await this.db.sync.put({ key: key(BLOB, it.id), kind: BLOB, id: it.id, projectId: it.projectId, hash: 'stored' });
+          }
+        } catch { /* retried by apply() */ }
+        this.report({ kind: 'syncing', pending: --left });
+      }
+    }));
+  }
+
   private async missing(): Promise<Record<string, string>> {
     return JSON.parse((await this.db.meta.get(MISSING))?.value ?? '{}');
   }
@@ -295,6 +330,7 @@ export class SyncEngine {
   }
   private async retryMissing() {
     const m = await this.missing();
+    await this.prefetchBlobs(Object.entries(m).map(([id, projectId]) => ({ id, projectId })));
     for (const [id, projectId] of Object.entries(m)) {
       if (!(await this.db.blobs.where('projectId').equals(projectId).count()) && !(await this.db.projects.get(projectId))) { await this.setMissing(id, null); continue; }
       await this.fetchBlob(id, projectId);
