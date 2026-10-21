@@ -243,7 +243,10 @@ export class ViewerEngine {
     this.gestures.cancel();
     this.mode = next;
     let to: Camera;
-    if (next.kind === 'overview3d') {
+    const carried = this.carryView(prev, next);
+    if (carried) {
+      to = carried;
+    } else if (next.kind === 'overview3d') {
       to = this.overviewCam ?? this.fitFor(next, { yaw: prev.kind === 'floor2d' ? DEFAULT_OVERVIEW_YAW : this.cam.yaw, elevation: ELEVATION_DEG, zoom: 1, panX: 0, panY: 0 });
     } else if (next.kind === 'isolated3d') {
       to = this.nav3d.get(next.floorId) ?? this.fitFor(next, { yaw: prev.kind === 'floor2d' ? DEFAULT_OVERVIEW_YAW : this.cam.yaw, elevation: ELEVATION_DEG, zoom: 1, panX: 0, panY: 0 });
@@ -253,6 +256,23 @@ export class ViewerEngine {
     this.applyTargets(true);
     this.setCamera(to, true);
     if (this.reduced) this.applyTargets(false);
+  }
+  /**
+   * Going from one zoomed-in floor straight to another (same 2D/3D view): show the same spot of the next plan at the
+   * same size, instead of fitting it to the screen. Null when not zoomed in, or the screen centre is off the plan.
+   */
+  private carryView(prev: ViewerMode, next: ViewerMode): Camera | null {
+    if (prev.kind === 'overview3d' || next.kind !== prev.kind || next.floorId === prev.floorId || !this.w) return null;
+    const a = this.floors.find((f) => f.id === prev.floorId), b = this.floors.find((f) => f.id === next.floorId);
+    if (!a?.image || !b?.image) return null;
+    if (this.cam.zoom <= this.fitFor(prev, this.cam).zoom * 1.05) return null; // at (or near) fit: fit the next one too
+    const cx = this.w / 2, cy = this.h / 2, sa = this.size(a), sb = this.size(b);
+    const uv = screenToUv(this.cam, cx, cy, sa.W, sa.H, this.elevationOf(a.id), cx, cy);
+    if (!uv) return null;
+    let cam: Camera = { ...this.cam, zoom: this.cam.zoom * (sa.W / sb.W) };
+    const p = uvToScreen(cam, uv.u, uv.v, sb.W, sb.H, this.elevationOf(b.id), cx, cy);
+    cam = { ...cam, panX: cam.panX + cx - p.x, panY: cam.panY + cy - p.y };
+    return cam;
   }
   private applyTargets(animate: boolean) {
     const m = this.mode;
