@@ -126,7 +126,7 @@ export function ReportView({ projectId }: { projectId: string }) {
       {status.failed.length > 0 && <div className="banner warn no-print" role="alert">This report is incomplete and should not be issued: {status.failed.slice(0, 5).join('; ')}.</div>}
       <article className="report" data-testid="report">
         <header className="cover">
-          <h1>As built Inspection Report (Draft)</h1>
+          <h1>As built Conditioning Report (Draft)</h1>
           <h2>{p.name}</h2>
           <dl className="meta">
             <dt>Reference</dt><dd>{p.reference || '—'}</dd>

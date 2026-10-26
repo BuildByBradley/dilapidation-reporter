@@ -40,7 +40,7 @@ test('A19 full report ignores workspace filters and matches stored data; escapes
   await expect(page.locator('.report-photo')).toHaveCount(photos.length);
   const text = await page.getByTestId('report').innerText();
   for (const f of findings) { expect(text).toContain(f.reference); expect(text).toContain(f.title); }
-  expect(text).toMatch(/As built Inspection Report \(Draft\)/);
+  expect(text).toMatch(/As built Conditioning Report \(Draft\)/);
   expect(text).not.toMatch(/prototype inspection record|regardless of any filters|No general notes|Key findings|By severity/i);
   expect(text).toContain('Floor plans');
   // summary counts derived from data: 8 findings, by floor and by category only
@@ -90,7 +90,7 @@ test('A20 printing a long report: legible pages, no clipped content, workspace c
   expect(pages).toBeGreaterThan(10);
   expect(info1).toMatch(/A4|595\.\d+ x 841\.\d+/);
   const txt = execFileSync('pdftotext', ['-layout', pdfPath, '-']).toString();
-  expect(txt).toMatch(/As built Inspection Report \(Draft\)/);
+  expect(txt).toMatch(/As built Conditioning Report \(Draft\)/);
   expect(txt).not.toMatch(/Print \/ Save as PDF|Export findings CSV|Back to inspection/); // toolbar is not printed
   const flat = txt.replace(/\s+/g, ' ');
   for (let i = 0; i < 40; i++) { const n = 9 + i; expect(flat, `finding D-${n}`).toContain(`END-${n}`); }
