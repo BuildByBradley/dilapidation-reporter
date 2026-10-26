@@ -60,7 +60,7 @@ Dilapidation Inspector records building-condition ("dilapidation") inspections o
 
 ## The report
 - Report (top bar) builds the full report from all findings, whatever filters are set in the workspace.
-- Order: cover page ("As built Conditioning Report (Draft)"); Summary (the inspector's summary text and tables of findings by floor and by category); project notes (only if written); a page per floor plan with numbered pins; then every finding: description and photos on the left, key plan and a close-up plan on the right.
+- Order: cover page ("Conditioning Report"); Summary (the inspector's summary text and tables of findings by floor and by category); project notes (only if written); a page per floor plan with numbered pins; then every finding: description and photos on the left, key plan and a close-up plan on the right.
 - Write the summary in Project ▾ → Project details (Report summary). "Draft from findings" writes a neutral first draft to edit. If it is left empty, the report uses an automatic draft and says so.
 - Print / Save as PDF opens the browser's print dialog — choose "Save as PDF". Wait for "Ready to print". Export findings CSV gives a spreadsheet of all findings.
 
