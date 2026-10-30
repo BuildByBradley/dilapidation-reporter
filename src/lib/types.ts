@@ -81,6 +81,8 @@ export const LIMITS = {
   /** Stored photo: long edge and JPEG quality. One image serves viewing, the report and sync (originals are not kept). */
   photoStoreEdge: 1920,
   photoStoreQuality: 0.75,
+  storageBudgetBytes: 1024 * 1024 * 1024,
+  typicalPhotoBytes: 350 * 1024,
   thumbEdge: 256,
   maxBackupExpandedBytes: 1024 * 1024 * 1024,
   pdfPreviewPageLimit: 60,

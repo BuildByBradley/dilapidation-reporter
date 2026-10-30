@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { go } from '../../app/App';
 import { SaveIndicator } from '../../components/SaveIndicator';
 import { CloudStatus } from '../../components/Cloud';
+import { StorageBar, useStorageUsage } from '../../components/StorageBar';
 import { HelpButton } from '../../components/Help';
 import { useProjectRole } from '../../sync/cloud';
 import { ShareDialog } from '../projects/ShareDialog';
@@ -71,6 +72,7 @@ export function Workspace({ projectId }: { projectId: string }) {
   const [discard, setDiscard] = useState<null | (() => void)>(null);
   const [lock, setLock] = useState<LockState>('pending');
   const compact = useCompact();
+  const storage = useStorageUsage(projectId);
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [sheetOpen, setSheetOpen] = useState(true);
   const lockRef = useRef<LockHandle | null>(null);
@@ -218,6 +220,7 @@ export function Workspace({ projectId }: { projectId: string }) {
       <h1 title={project.name}>{project.name}</h1>
       <SaveIndicator />
       <CloudStatus />
+      <StorageBar projectId={projectId} />
       <span className="spacer" />
       <HelpButton />
       <button onClick={() => { setDrawer(null); toggle2D(); }} aria-pressed={viewer.kind === 'floor2d'}>{viewer.kind === 'floor2d' ? '3D view' : '2D view'}</button>
@@ -248,6 +251,7 @@ export function Workspace({ projectId }: { projectId: string }) {
         </div>
       )}
       {!locksSupported() && <div className="banner warn small">This browser cannot prevent the same project being edited in two tabs. Keep it open in one tab only.</div>}
+      {storage.level !== 'ok' && <div className={`banner ${storage.level === 'crit' ? 'warn' : 'warn small'}`} role={storage.level === 'crit' ? 'alert' : undefined} data-testid="storage-banner">{storage.level === 'crit' ? '⚠ Storage is almost full on this device.' : 'Storage is getting full on this device.'} Download a backup and clear finished projects before adding more photos.</div>}
       {reviewCount > 0 && <div className="banner warn small" data-testid="review-banner">⚠ {reviewCount} finding{reviewCount === 1 ? ' needs' : 's need'} a location review after a plan replacement. They are flagged in the list and in the report.</div>}
     </>
   );

@@ -8,6 +8,7 @@ import { useLive } from '../../lib/useLive';
 import { loadSampleProject } from './sample';
 import { SaveIndicator } from '../../components/SaveIndicator';
 import { CloudPanel, CloudStatus } from '../../components/Cloud';
+import { StorageBar } from '../../components/StorageBar';
 import { HelpButton } from '../../components/Help';
 import { leaveProject, useProjectRole } from '../../sync/cloud';
 
@@ -91,6 +92,7 @@ export function ProjectHome() {
         <span className="spacer" />
         <SaveIndicator />
         <CloudStatus />
+        <StorageBar />
         <HelpButton />
       </header>
       <main className="content">
