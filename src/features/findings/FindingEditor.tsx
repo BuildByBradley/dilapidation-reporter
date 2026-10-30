@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PhotoSection } from '../photos/PhotoSection';
-import { Confirm, useToast } from '../../components/ui';
+import { Confirm, Dialog, useToast } from '../../components/ui';
 import { registerFlush } from '../../data/flush';
 import * as repo from '../../data/repo';
+import { NEW_CATEGORY, promptNewCategory } from '../categories/newCategory';
 import { SEVERITIES, type Category, type Finding, type Floor, type Photo, type Severity } from '../../lib/types';
 
 type Fields = { title: string; description: string; locationNotes: string; severity: Severity; categoryId: string };
@@ -13,6 +14,7 @@ export function FindingEditor({ finding, categories, floors, photos, readOnly, o
   onRelocate(): void; onDeleted(): void; onClose(): void;
 }) {
   const toast = useToast();
+  const [copying, setCopying] = useState(false);
   const [f, setF] = useState<Fields>(pick(finding));
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,8 +70,12 @@ export function FindingEditor({ finding, categories, floors, photos, readOnly, o
       )}
       <label>Title<input value={f.title} disabled={readOnly} onChange={(e) => change({ title: e.target.value })} /></label>
       <div className="two">
-        <label>Category<select value={f.categoryId} disabled={readOnly} onChange={(e) => change({ categoryId: e.target.value }, true)}>
+        <label>Category<select value={f.categoryId} disabled={readOnly} onChange={async (e) => {
+          if (e.target.value !== NEW_CATEGORY) { change({ categoryId: e.target.value }, true); return; }
+          try { const id = await promptNewCategory(finding.projectId); if (id) change({ categoryId: id }, true); } catch (err) { toast('error', err instanceof Error ? err.message : String(err)); }
+        }}>
           {selectable.map((c) => <option key={c.id} value={c.id}>{c.name}{c.archived ? ' (archived)' : ''}</option>)}
+          <option value={NEW_CATEGORY}>+ New category…</option>
         </select></label>
         <label>Severity<select value={f.severity} disabled={readOnly} onChange={(e) => change({ severity: e.target.value as Severity }, true)}>
           {SEVERITIES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
@@ -83,8 +89,10 @@ export function FindingEditor({ finding, categories, floors, photos, readOnly, o
       <PhotoSection findingId={finding.id} photos={photos} readOnly={readOnly} />
       <div className="row">
         <button disabled={readOnly} onClick={onRelocate}>Relocate pin</button>
+        <button disabled={readOnly} onClick={async () => { await save(); setCopying(true); }}>Copy to floor…</button>
         <button className="danger" disabled={readOnly} onClick={() => setConfirmDelete(true)}>Delete finding</button>
       </div>
+      {copying && <CopyToFloorsDialog finding={finding} floors={floors} photoCount={photos.length} onClose={() => setCopying(false)} />}
       {confirmDelete && (
         <Confirm title="Delete finding?" danger confirmLabel="Delete finding" onCancel={() => setConfirmDelete(false)}
           onConfirm={async () => { setConfirmDelete(false); try { await repo.deleteFinding(finding.id); onDeleted(); } catch (e) { toast('error', e instanceof Error ? e.message : String(e)); } }}>
@@ -92,5 +100,39 @@ export function FindingEditor({ finding, categories, floors, photos, readOnly, o
         </Confirm>
       )}
     </section>
+  );
+}
+
+/** Pick floors to copy a finding to (same plan position, details and photos). */
+function CopyToFloorsDialog({ finding, floors, photoCount, onClose }: { finding: Finding; floors: Floor[]; photoCount: number; onClose(): void }) {
+  const toast = useToast();
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const toggle = (id: string) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const others = floors.filter((f) => f.id !== finding.floorId);
+  const run = async () => {
+    setBusy(true);
+    try {
+      const ids = others.filter((f) => picked.has(f.id)).map((f) => f.id); // in floor order
+      const copies = await repo.copyFindingToFloors(finding.id, ids);
+      const name = new Map(floors.map((f) => [f.id, f.name]));
+      toast('ok', `Copied to ${copies.map((c) => `${name.get(c.floorId)} (${c.reference})`).join(', ')}`);
+      onClose();
+    } catch (e) { toast('error', e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+  };
+  return (
+    <Dialog title={`Copy ${finding.reference} to other floors`} onClose={onClose}
+      footer={<><button onClick={onClose}>Cancel</button>
+        <button className="primary" disabled={!picked.size || busy} onClick={run}>{busy ? 'Copying…' : `Copy to ${picked.size || ''} floor${picked.size === 1 ? '' : 's'}`.replace('  ', ' ')}</button></>}>
+      <p className="small">Each copy gets the same position on the plan, title, category, severity, description, location notes and {photoCount} photo{photoCount === 1 ? '' : 's'}, and the next number on its floor.</p>
+      <ul className="copy-floors">
+        {others.map((f) => (
+          <li key={f.id}><label className="inline"><input type="checkbox" checked={picked.has(f.id)} disabled={!f.planAssetId} onChange={() => toggle(f.id)} />
+            <span>{f.name}{!f.planAssetId && <span className="muted small"> — no plan yet</span>}</span></label></li>
+        ))}
+      </ul>
+      {others.length > 1 && <button type="button" className="link" onClick={() => setPicked(new Set(others.filter((f) => f.planAssetId).map((f) => f.id)))}>Select all floors</button>}
+      <p className="small muted">The position is the same spot on each floor’s drawing, so it lines up when the plans share a layout. Use Relocate pin on a copy if it needs moving.</p>
+    </Dialog>
   );
 }

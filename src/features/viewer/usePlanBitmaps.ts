@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { db } from '../../data/db';
 import { getBlob } from '../../data/repo';
+import { useLive } from '../../lib/useLive';
 import type { Floor } from '../../lib/types';
 
 /** Decodes each floor's viewer derivative once, and closes bitmaps (releasing memory) when replaced or unmounted. */
@@ -8,7 +9,14 @@ export function usePlanBitmaps(floors: Floor[]) {
   const cache = useRef(new Map<string, { assetId: string; bitmap: ImageBitmap }>());
   const [, setTick] = useState(0);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const key = floors.map((f) => `${f.id}:${f.planAssetId ?? ''}`).join('|');
+  const assetKey = floors.map((f) => `${f.id}:${f.planAssetId ?? ''}`).join('|');
+  // How many plan images are actually stored: changes when a plan arrives later (cloud sync), triggering a retry.
+  const [stored] = useLive(async () => {
+    const assets = await db.assets.bulkGet(floors.flatMap((f) => (f.planAssetId ? [f.planAssetId] : [])));
+    const ids = assets.flatMap((a) => (a ? [a.displayBlobId] : []));
+    return ids.length ? (await db.blobs.where('id').anyOf(ids).primaryKeys()).length : 0;
+  }, [assetKey], 0);
+  const key = `${assetKey}#${stored}`;
   useEffect(() => {
     let live = true;
     const wanted = new Map(floors.filter((f) => f.planAssetId).map((f) => [f.id, f.planAssetId!]));

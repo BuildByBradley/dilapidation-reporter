@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { go } from '../../app/App';
 import { SaveIndicator } from '../../components/SaveIndicator';
+import { CloudStatus } from '../../components/Cloud';
+import { StorageBar, useStorageUsage } from '../../components/StorageBar';
+import { HelpButton } from '../../components/Help';
+import { useProjectRole } from '../../sync/cloud';
+import { ShareDialog } from '../projects/ShareDialog';
 import { Confirm, Dialog, useToast } from '../../components/ui';
 import { db } from '../../data/db';
 import { flushAll } from '../../data/flush';
@@ -10,6 +15,7 @@ import type { UV } from '../../lib/coords';
 import { createBackup } from '../../lib/backup';
 import { downloadBlob } from '../../lib/imaging';
 import { useLive } from '../../lib/useLive';
+import { RenumberDialog } from '../findings/RenumberDialog';
 import type { Asset, Category, Finding, Floor, InteractionMode, Photo, ViewerMode } from '../../lib/types';
 import { CategoriesDialog } from '../categories/CategoriesDialog';
 import { FindingEditor } from '../findings/FindingEditor';
@@ -17,6 +23,7 @@ import { FindingsList } from '../findings/FindingsList';
 import { PlacementPanel, emptyForm, type NewFindingForm } from '../findings/PlacementPanel';
 import { ImportDialog } from '../imports/ImportDialog';
 import { FloorList } from './FloorList';
+import { buildReportModel, draftSummary } from '../../lib/report';
 import { ViewerPane } from './ViewerPane';
 import type { Draft } from './engine';
 
@@ -24,7 +31,8 @@ type LockState = 'pending' | 'held' | 'readonly';
 type Drawer = null | 'top' | 'left' | 'right';
 
 /** Phone / small-tablet layout: the plan fills the screen and everything else lives behind edge tabs. */
-const COMPACT_QUERY = '(max-width: 900px)';
+/** Phone layout: narrow screens, and short ones (a phone held sideways is wide but only ~370-450 px tall). */
+const COMPACT_QUERY = '(max-width: 900px), (max-height: 560px)';
 function useCompact() {
   const [c, setC] = useState(() => typeof window !== 'undefined' && window.matchMedia(COMPACT_QUERY).matches);
   useEffect(() => {
@@ -50,21 +58,29 @@ export function Workspace({ projectId }: { projectId: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(null);
   const [form, setForm] = useState<NewFindingForm>(emptyForm());
+  const [pendingPhotos, setPendingPhotos] = useState<repo.ProcessedImage[]>([]);
+  const [sheetMag, setSheetMag] = useState<HTMLCanvasElement | null>(null);
+  const [magCrop, setMagCrop] = useState(120);
   const [importFor, setImportFor] = useState<string | null>(null);
   const [showCats, setShowCats] = useState(false);
+  const [showRenumber, setShowRenumber] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const [showShare, setShowShare] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
   const [saving, setSaving] = useState(false);
   const [discard, setDiscard] = useState<null | (() => void)>(null);
   const [lock, setLock] = useState<LockState>('pending');
   const compact = useCompact();
+  const storage = useStorageUsage(projectId);
   const [drawer, setDrawer] = useState<Drawer>(null);
   const [sheetOpen, setSheetOpen] = useState(true);
   const lockRef = useRef<LockHandle | null>(null);
   const lastCategory = useRef('');
 
-  const readOnly = lock === 'readonly';
+  const role = useProjectRole(projectId);
+  const viewOnly = role === 'viewer';
+  const readOnly = lock === 'readonly' || viewOnly;
   useEffect(() => {
     // Retry briefly: React StrictMode (dev) mounts, unmounts and remounts, so the first claim may still be
     // releasing when the second asks. A genuinely different tab keeps the lock and stays denied.
@@ -91,7 +107,7 @@ export function Workspace({ projectId }: { projectId: string }) {
   const counts = useMemo(() => findings.reduce<Record<string, number>>((m, f) => ({ ...m, [f.floorId]: (m[f.floorId] ?? 0) + 1 }), {}), [findings]);
   const selected = findings.find((f) => f.id === selectedId) ?? null;
   const placing = interaction.kind !== 'navigate';
-  const formDirty = interaction.kind === 'placePin' && !!(form.title || form.description || form.locationNotes);
+  const formDirty = interaction.kind === 'placePin' && !!(form.title || form.description || form.locationNotes || pendingPhotos.length);
   const currentFloorId = 'floorId' in viewer ? viewer.floorId : null;
 
   // clear the selection only when a finding we have seen disappears (a just-created one may not be in the live list yet)
@@ -107,7 +123,7 @@ export function Workspace({ projectId }: { projectId: string }) {
 
   useEffect(() => { if (selectedId || draft || interaction.kind !== 'navigate') { setSheetOpen(true); setDrawer(null); } }, [selectedId, draft, interaction.kind]);
 
-  const cancelPlacement = useCallback(() => { setInteraction({ kind: 'navigate' }); setDraft(null); setForm(emptyForm(lastCategory.current)); }, []);
+  const cancelPlacement = useCallback(() => { setInteraction({ kind: 'navigate' }); setDraft(null); setForm(emptyForm(lastCategory.current)); setPendingPhotos([]); }, []);
   const guardDiscard = (proceed: () => void) => { if (formDirty && draft) setDiscard(() => proceed); else proceed(); };
 
   const selectFloor = (id: string) => {
@@ -138,7 +154,7 @@ export function Workspace({ projectId }: { projectId: string }) {
   const togglePlace = () => {
     if (readOnly || viewer.kind === 'overview3d') return;
     if (placing) { guardDiscard(cancelPlacement); return; }
-    setSelectedId(null); setInteraction({ kind: 'placePin' }); setDraft(null); setForm(emptyForm(lastCategory.current)); setPanelOpen(true);
+    setSelectedId(null); setInteraction({ kind: 'placePin' }); setDraft(null); setForm(emptyForm(lastCategory.current)); setPendingPhotos([]); setPanelOpen(true);
   };
   const startRelocate = (id: string) => {
     const f = findings.find((x) => x.id === id);
@@ -165,10 +181,14 @@ export function Workspace({ projectId }: { projectId: string }) {
       } else {
         const f = await repo.createFinding({ floorId: draft.floorId, u: draft.u, v: draft.v, categoryId: form.categoryId, title: form.title, severity: form.severity, description: form.description, locationNotes: form.locationNotes });
         lastCategory.current = form.categoryId;
+        // The finding is saved first; photos follow. A failed photo leaves the finding in place and says which.
+        let failed = 0;
+        for (const img of pendingPhotos) { try { await repo.addPhoto(f.id, img); } catch { failed++; } }
         setSelectedId(f.id);
-        toast('ok', `${f.reference} saved — add photos below`);
+        if (failed) toast('error', `${f.reference} saved, but ${failed} photo${failed === 1 ? '' : 's'} could not be attached. Add ${failed === 1 ? 'it' : 'them'} again from the finding.`);
+        else toast('ok', pendingPhotos.length ? `${f.reference} saved with ${pendingPhotos.length} photo${pendingPhotos.length === 1 ? '' : 's'}` : `${f.reference} saved`);
       }
-      setInteraction({ kind: 'navigate' }); setDraft(null); setForm(emptyForm(lastCategory.current));
+      setInteraction({ kind: 'navigate' }); setDraft(null); setForm(emptyForm(lastCategory.current)); setPendingPhotos([]);
     } catch (e) {
       toast('error', `Not saved: ${e instanceof Error ? e.message : String(e)} Your entries are still here — try again.`);
     } finally { setSaving(false); }
@@ -191,7 +211,7 @@ export function Workspace({ projectId }: { projectId: string }) {
     <ViewerPane
       floors={floors} findings={findings} categories={categories} mode={viewer} interaction={interaction} selectedId={selectedId} draft={draft} readOnly={readOnly} compact={compact}
       onFloorPick={selectFloor} onSelect={selectFinding} onPlace={onPlace} onEscape={onEscape} onReturn={toOverview} onToggle2D={toggle2D} onTogglePlace={togglePlace}
-      onNotice={(t) => toast('info', t)}
+      onNotice={(t) => toast('info', t)} sheetMagnifier={sheetMag} magCrop={magCrop}
     />
   );
   const headerContent = (
@@ -199,15 +219,20 @@ export function Workspace({ projectId }: { projectId: string }) {
       <button className="link" onClick={leave} aria-label="Back to projects">← Projects</button>
       <h1 title={project.name}>{project.name}</h1>
       <SaveIndicator />
+      <CloudStatus />
+      <StorageBar projectId={projectId} />
       <span className="spacer" />
+      <HelpButton />
       <button onClick={() => { setDrawer(null); toggle2D(); }} aria-pressed={viewer.kind === 'floor2d'}>{viewer.kind === 'floor2d' ? '3D view' : '2D view'}</button>
       <button className="primary" onClick={openReport}>Report</button>
       <div className="menu">
         <button aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>Project ▾</button>
         {menuOpen && (
           <div className="menu-list" role="menu" onClick={() => { setMenuOpen(false); setDrawer(null); }}>
+            <button role="menuitem" onClick={() => setShowShare(true)}>Share project…</button>
             <button role="menuitem" onClick={() => setShowDetails(true)}>Project details</button>
             <button role="menuitem" onClick={() => setShowCats(true)}>Categories</button>
+            <button role="menuitem" disabled={readOnly} onClick={() => setShowRenumber(true)}>Renumber findings…</button>
             <button role="menuitem" onClick={backup}>Back up project</button>
             <button role="menuitem" onClick={() => repo.duplicateProject(projectId).then(() => toast('ok', 'Project duplicated')).catch((e) => toast('error', String(e)))}>Duplicate project</button>
           </div>
@@ -217,12 +242,16 @@ export function Workspace({ projectId }: { projectId: string }) {
   );
   const banners = (
     <>
-      {readOnly && (
+      {viewOnly && (
+        <div className="banner" role="status" data-testid="viewonly-banner">This project is shared with you as a <strong>viewer</strong>: you can look around and print reports, but not change anything.</div>
+      )}
+      {readOnly && !viewOnly && (
         <div className="banner warn" role="alert" data-testid="readonly-banner">
           This project is open for editing in another tab or window, so this tab is <strong>read-only</strong> to avoid overwriting changes. <button onClick={retryLock}>Try again</button>
         </div>
       )}
       {!locksSupported() && <div className="banner warn small">This browser cannot prevent the same project being edited in two tabs. Keep it open in one tab only.</div>}
+      {storage.level !== 'ok' && <div className={`banner ${storage.level === 'crit' ? 'warn' : 'warn small'}`} role={storage.level === 'crit' ? 'alert' : undefined} data-testid="storage-banner">{storage.level === 'crit' ? '⚠ Storage is almost full on this device.' : 'Storage is getting full on this device.'} Download a backup and clear finished projects before adding more photos.</div>}
       {reviewCount > 0 && <div className="banner warn small" data-testid="review-banner">⚠ {reviewCount} finding{reviewCount === 1 ? ' needs' : 's need'} a location review after a plan replacement. They are flagged in the list and in the report.</div>}
     </>
   );
@@ -232,6 +261,7 @@ export function Workspace({ projectId }: { projectId: string }) {
         mode={interaction.kind === 'relocatePin' ? 'relocate' : 'new'} reference={relocFinding?.reference} floorName={placementFloor.name}
         u={draft.u} v={draft.v} assetWidth={draftAsset.width} assetHeight={draftAsset.height} categories={categories} form={form} setForm={setForm}
         onNudge={nudge} onConfirm={confirmPlacement} onCancel={() => guardDiscard(cancelPlacement)} busy={saving}
+        compact={compact} magnifierRef={setSheetMag} magCrop={magCrop} setMagCrop={setMagCrop} onShowPlan={() => setSheetOpen(false)} pendingPhotos={pendingPhotos} setPendingPhotos={setPendingPhotos}
       />
     ) : placing ? (
       <section className="editor"><h2>{interaction.kind === 'relocatePin' ? 'Relocate pin' : 'Add pin'}</h2><p>Tap the plan where the condition is. A target and magnifier will appear so you can fine-tune before saving.</p>
@@ -250,6 +280,8 @@ export function Workspace({ projectId }: { projectId: string }) {
     <>
       {importFor && <ImportDialog floors={floors} startFloorId={importFor} findingCounts={counts} onClose={() => setImportFor(null)} />}
       {showCats && <CategoriesDialog projectId={projectId} onClose={() => setShowCats(false)} />}
+      {showRenumber && <RenumberDialog projectId={projectId} onClose={() => setShowRenumber(false)} />}
+      {showShare && <ShareDialog projectId={projectId} projectName={project.name} onClose={() => setShowShare(false)} />}
       {showDetails && <ProjectDetails project={project} onClose={() => setShowDetails(false)} readOnly={readOnly} />}
       {discard && (
         <Confirm title="Discard the pin you are placing?" confirmLabel="Discard" danger onCancel={() => setDiscard(null)} onConfirm={() => { const d = discard; setDiscard(null); d(); }}>
@@ -285,7 +317,7 @@ export function Workspace({ projectId }: { projectId: string }) {
         </section>
         <aside id="drawer-left" className={`drawer drawer-left${drawer === 'left' ? ' open' : ''}`} aria-label="Floors" inert={drawer !== 'left'}>
           <button className="drawer-close" onClick={() => setDrawer(null)}>‹ Close</button>
-          <FloorList floors={floors} counts={counts} mode={viewer} readOnly={readOnly}
+          <FloorList projectId={projectId} floors={floors} counts={counts} mode={viewer} readOnly={readOnly}
             onSelect={(id) => { setDrawer(null); selectFloor(id); }} onImport={(id) => { setDrawer(null); setImportFor(id); }} onOverview={() => { setDrawer(null); toOverview(); }} />
         </aside>
         <aside id="drawer-right" className={`drawer drawer-right${drawer === 'right' ? ' open' : ''}`} aria-label="Findings" inert={drawer !== 'right'}>
@@ -294,7 +326,7 @@ export function Workspace({ projectId }: { projectId: string }) {
         </aside>
 
         {editorNode && (
-          <section className={`ws-sheet${sheetOpen ? '' : ' collapsed'}`} aria-label="Finding details" data-testid="bottom-sheet">
+          <section className={`ws-sheet${sheetOpen ? '' : ' collapsed'}${draft && sheetOpen ? ' full' : ''}`} aria-label="Finding details" data-testid="bottom-sheet">
             <button className="sheet-head" aria-expanded={sheetOpen} onClick={() => setSheetOpen(!sheetOpen)}>
               <span className="grabber" aria-hidden="true" /><span className="sheet-title">{sheetTitle}</span><span aria-hidden="true">{sheetOpen ? '▾' : '▴'}</span>
             </button>
@@ -313,7 +345,7 @@ export function Workspace({ projectId }: { projectId: string }) {
       {banners}
       <div className={`ws-body${panelOpen ? '' : ' panel-closed'}`}>
         <aside className="ws-left">
-          <FloorList floors={floors} counts={counts} mode={viewer} readOnly={readOnly} onSelect={selectFloor} onImport={setImportFor} onOverview={toOverview} />
+          <FloorList projectId={projectId} floors={floors} counts={counts} mode={viewer} readOnly={readOnly} onSelect={selectFloor} onImport={setImportFor} onOverview={toOverview} />
         </aside>
         <main className="ws-main">{viewerPane}</main>
         <aside className="ws-right" aria-label="Findings panel">
@@ -334,7 +366,12 @@ export function Workspace({ projectId }: { projectId: string }) {
 
 function ProjectDetails({ project, onClose, readOnly }: { project: ProjectT; onClose: () => void; readOnly: boolean }) {
   const toast = useToast();
-  const [d, setD] = useState({ name: project.name, siteName: project.siteName, address: project.address, client: project.client, inspector: project.inspector, inspectionDate: project.inspectionDate, reference: project.reference, notes: project.notes });
+  const [d, setD] = useState({ name: project.name, siteName: project.siteName, address: project.address, client: project.client, inspector: project.inspector, inspectionDate: project.inspectionDate, reference: project.reference, notes: project.notes, summary: project.summary ?? '' });
+  const draft = async () => {
+    const text = draftSummary(buildReportModel(await repo.loadBundle(project.id)), d);
+    if (d.summary.trim() && !window.confirm('Replace the current summary with a fresh draft from the findings?')) return;
+    setD({ ...d, summary: text });
+  };
   const set = (k: keyof typeof d) => (e: { target: { value: string } }) => setD({ ...d, [k]: e.target.value });
   return (
     <Dialog title="Project details" onClose={onClose} footer={<><button onClick={onClose}>Cancel</button><button className="primary" disabled={readOnly} onClick={async () => { try { await repo.updateProject(project.id, d); onClose(); } catch (e) { toast('error', String(e)); } }}>Save</button></>}>
@@ -347,6 +384,10 @@ function ProjectDetails({ project, onClose, readOnly }: { project: ProjectT; onC
         <label>Inspection date<input type="date" value={d.inspectionDate} onChange={set('inspectionDate')} /></label>
         <label>Reference<input value={d.reference} onChange={set('reference')} /></label>
         <label className="span2">Notes<textarea rows={3} value={d.notes} onChange={set('notes')} /></label>
+        <label className="span2">Report summary <span className="muted small">(the Summary page of the report — what the client reads first)</span>
+          <textarea rows={7} value={d.summary} onChange={set('summary')} placeholder="Overall condition, the main issues and what needs attention. Use “Draft from findings” for a first version." />
+        </label>
+        <div className="span2 row"><button type="button" disabled={readOnly} onClick={() => void draft().catch((e) => toast('error', String(e)))}>Draft from findings</button><span className="small muted">Builds a neutral first draft from the recorded findings; edit it before issuing.</span></div>
       </div>
     </Dialog>
   );

@@ -67,7 +67,11 @@ The long-report print test additionally needs poppler (`pdftotext`, `pdfinfo`, `
    **Floors** (left), **Findings** (right), the project menu (top tab) and a bottom toolbar. Finding details and the new-pin form open as a
    collapsible bottom sheet. Larger screens keep the three-column layout.
 4. **Pins** — choose **Add pin** (never created while navigating), tap the plan, check the crosshair and the 4× magnifier,
-   fine-tune with the nudge buttons (1 source-image pixel; 10 with Shift) and save with a title and category.
+   fine-tune with the nudge buttons (1 source-image pixel; 10 with Shift) and save with a title and category. Photos can be
+   taken or uploaded in the same panel and are attached when the finding is saved. On a phone the panel fills the screen as
+   three steps — **position** (zoomed target + arrow pad, no keyboard), **details**, **photos** — and *Show plan to re-tap*
+   collapses it so you can tap a new spot. Photos can be drawn on (pen, circle, arrow; four colours; undo) before they are used.
+   Photos are stored compactly: one 1920 px JPEG (quality 0.75, roughly 250–400 KB) plus a thumbnail; the camera original is not kept.
    Relocation uses the same flow. In Navigate mode a tap selects a pin; overlapping pins open a chooser. `Esc` cancels.
 5. **Photos** — in a finding: *Take photo* (rear camera, preview → capture → retake/accept), *Upload photos*, or the
    device-camera file picker fallback. Captions, order, cover photo, full-size preview and delete are supported.
@@ -82,6 +86,55 @@ A static build is published on the `gh-pages` branch, served at `https://buildby
 Pages is enabled (repo **Settings → Pages → Build and deployment → Deploy from a branch → `gh-pages` / `(root)`**). It is HTTPS, so the live
 camera works on a phone. Data stays in each visitor's own browser; there is no server. To republish after changing the code:
 `npm run build:pages`, then push the contents of `dist-pages/` (plus an empty `.nojekyll` file) to the `gh-pages` branch.
+
+## Cloud sync (rev 02): phone ↔ computer
+
+Sign in with the same account on every device (projects page → *Sync phone and computer*). Findings, plans and photos then
+appear on your other devices within seconds; the status light in the top bar shows *Synced · live*, *Syncing N…*,
+*Offline · N waiting* or *Sync problem*.
+
+* **Local first.** The app still saves everything to the browser first and works with no signal. Changes upload when a
+  connection is available (on reconnect, when the app comes back to the foreground, and every minute as a safety net).
+* **Backend:** a Supabase project (URL and publishable key in `src/sync/config.ts`; override with `VITE_SUPABASE_URL` /
+  `VITE_SUPABASE_PUBLISHABLE_KEY`, or `VITE_SUPABASE_URL=off` to build without sync). One-time database setup:
+  run [`supabase/setup.sql`](supabase/setup.sql) in the Supabase SQL Editor. It creates one `records` table (row-level
+  security: each user sees only their own rows), a private `blobs` storage bucket and the live-update feed.
+* **How it works** (`src/sync/engine.ts`): every synced row's content hash is compared with the hash last exchanged with
+  the server; differences are uploaded files-first, then records parent-before-child; deletions travel as tombstones.
+  Incoming records wait for the plan/photo files they reference. An unsynced local edit wins over an incoming change to
+  the same row; otherwise the latest write wins.
+* **Sync mode (per device).** *Manual* (default on phones): nothing is sent or received until you tap **Sync now** in the top
+  bar, which also shows how many changes are waiting — saves mobile data on site. *Automatic* (default on computers): live.
+* **Passwords:** *Forgot password?* emails a reset link (set the Supabase **Site URL** to the app's address so the link returns
+  here); *Change password* is in the account panel.
+* **Signing out** stops syncing on that device and keeps its projects locally.
+
+## Sharing projects (rev 04)
+
+Owner: *Project ▾ → Share project…* → choose **Editor** or **Viewer** → *Create invite link* → send it (WhatsApp, email…).
+The invitee opens the link (`#/join/<token>`), signs in or creates an account, and the project syncs to them. Links are
+single-use and expire after 14 days; the owner can change roles, remove people and revoke unused links. Viewers get a
+read-only workspace. Non-owners *Leave* a project (removed from their devices only); only the owner can delete it for everyone.
+
+Server setup: run [`supabase/sharing.sql`](supabase/sharing.sql) once (after `setup.sql`). It changes `records` to one row per
+record shared by all members, adds `project_members` / `project_invites` with row-level security, the `accept_invite()`
+function, and per-project file folders (`<projectId>/<fileId>`). Until it is run the app keeps working exactly as before
+(it detects the schema). After it is run, each owner's device moves its old files into the per-project folders automatically.
+Invite links are used instead of invite-by-email because email addresses are not verified on this project.
+
+## Help assistant and suggestions (rev 04)
+
+The **?** button opens Help: *Ask* (an AI assistant answering from the user guide), *Guide* (the same guide, searchable,
+works offline) and *Suggest an improvement* (stored in `public.feedback` and emailed to the owner).
+The guide lives in [`supabase/functions/assistant/guide.ts`](supabase/functions/assistant/guide.ts) — keep it current.
+
+Server setup:
+1. Run [`supabase/feedback.sql`](supabase/feedback.sql).
+2. Deploy the Edge Function [`supabase/functions/assistant`](supabase/functions/assistant) (`index.ts` + `guide.ts`), e.g.
+   `supabase functions deploy assistant`, or Dashboard → Edge Functions → Deploy a new function → Via Editor (name it `assistant`).
+3. Secrets (Dashboard → Edge Functions → Secrets): `ANTHROPIC_API_KEY` (for Ask), and optionally `RESEND_API_KEY` +
+   `OWNER_EMAIL` to email each suggestion (with Resend's test sender, only your Resend account's own address can receive).
+Without the function, the Guide still works and suggestions are saved to the table.
 
 ## Where data lives, backups
 

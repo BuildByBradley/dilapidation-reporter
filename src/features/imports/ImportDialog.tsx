@@ -141,7 +141,7 @@ export function ImportDialog({ floors, startFloorId, findingCounts, onClose }: {
         {busy ? <button onClick={() => abort.current?.abort()}>Cancel import</button> : <button onClick={onClose}>Close</button>}
         <button className="primary" disabled={!canRun} onClick={run}>Import {entries.length > 1 ? `${entries.length} plans` : 'plan'}</button>
       </>}>
-      <p className="muted">PNG, JPEG or PDF (one page per floor). Up to {LIMITS.maxPlanBytes / 1048576} MB and {LIMITS.maxPlanMegapixels} megapixels per file. Drawings are stored only in this browser; no scale is inferred.</p>
+      <p className="muted">PNG, JPEG or PDF (one page per floor). Up to {LIMITS.maxPlanBytes / 1048576} MB and {LIMITS.maxPlanMegapixels} megapixels per file. PDF pages are rendered at high resolution for crisp line work. Drawings are stored in this browser (and in your cloud account when signed in); no scale is inferred.</p>
       <div className="toolbar-row">
         <button onClick={() => fileRef.current?.click()} disabled={busy}>Choose files…</button>
         <input ref={fileRef} type="file" multiple hidden aria-label="Plan files" accept="image/png,image/jpeg,application/pdf,.png,.jpg,.jpeg,.pdf"

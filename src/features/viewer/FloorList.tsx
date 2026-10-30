@@ -4,14 +4,15 @@ import * as repo from '../../data/repo';
 import { useToast } from '../../components/ui';
 import type { Floor, ViewerMode } from '../../lib/types';
 
-export function FloorList({ floors, counts, mode, readOnly, onSelect, onImport, onOverview }: {
+export function FloorList({ floors, counts, mode, readOnly, onSelect, onImport, onOverview, projectId }: {
   floors: Floor[]; counts: Record<string, number>; mode: ViewerMode; readOnly: boolean;
-  onSelect(id: string): void; onImport(id: string): void; onOverview(): void;
+  onSelect(id: string): void; onImport(id: string): void; onOverview(): void; projectId: string;
 }) {
   const toast = useToast();
   const [editing, setEditing] = useState<string | null>(null);
   const [name, setName] = useState('');
   const currentId = 'floorId' in mode ? mode.floorId : null;
+  const codes = repo.floorCodes(floors);
   const guard = (p: Promise<unknown>) => p.catch((e) => toast('error', e instanceof Error ? e.message : String(e)));
   return (
     <nav className="floor-list" aria-label="Floors">
@@ -38,9 +39,18 @@ export function FloorList({ floors, counts, mode, readOnly, onSelect, onImport, 
                   <button disabled={readOnly} aria-label={`Rename ${f.name}`} onClick={() => { setEditing(f.id); setName(f.name); }}>Rename</button>
                   <button disabled={readOnly || i === 0} aria-label={`Move ${f.name} up`} onClick={() => guard(repo.moveFloor(f.id, -1))}>↑</button>
                   <button disabled={readOnly || i === floors.length - 1} aria-label={`Move ${f.name} down`} onClick={() => guard(repo.moveFloor(f.id, 1))}>↓</button>
+                  {!(counts[f.id] ?? 0) && floors.length > 1 && (
+                    <button className="danger" disabled={readOnly} aria-label={`Remove ${f.name}`}
+                      onClick={() => { if (window.confirm(`Remove "${f.name}"${f.planAssetId ? ' and its plan' : ''}?`)) void guard(repo.deleteFloor(f.id)); }}>Remove</button>
+                  )}
                 </>
               )}
             </div>
+            <label className="display-width small muted" title="Finding numbers on this floor start with this, e.g. G-001, L1-001, Roof-001">Number prefix
+              <input key={`${f.id}:${f.code ?? ''}`} defaultValue={f.code ?? ''} placeholder={codes.get(f.id)} maxLength={6} disabled={readOnly} aria-label={`${f.name} number prefix`}
+                onBlur={(e) => { if (e.target.value !== (f.code ?? '')) void guard(repo.updateFloor(f.id, { code: e.target.value })); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+            </label>
             {f.planAssetId && (
               <label className="display-width small muted">Display width
                 <input type="number" min={20} max={400} step={5} value={f.displayWidth} disabled={readOnly} aria-label={`${f.name} display width`}
@@ -50,7 +60,8 @@ export function FloorList({ floors, counts, mode, readOnly, onSelect, onImport, 
           </li>
         ))}
       </ol>
-      <p className="small muted">Names are labels only. Display width aligns the stack visually — it is display calibration, not survey data.</p>
+      <button className="add-floor" disabled={readOnly} onClick={() => guard(repo.addFloor(projectId).then((f) => toast('ok', `${f.name} added — import its plan`)))}>+ Add floor</button>
+      <p className="small muted">Findings are numbered per floor with its prefix (G-001, L1-001…). Names are labels only. Display width aligns the stack visually — it is display calibration, not survey data.</p>
       {currentId && <button onClick={onOverview}>Return to building</button>}
     </nav>
   );

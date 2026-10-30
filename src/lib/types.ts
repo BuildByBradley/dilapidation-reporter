@@ -11,6 +11,8 @@ export type Project = {
   id: string; name: string; siteName: string; address: string;
   client: string; inspector: string; inspectionDate: string;
   reference: string; notes: string; nextFindingNumber: number;
+  /** Executive summary written by the inspector (shown on the report's first pages). */
+  summary?: string;
   isSample?: boolean;
   createdAt: string; updatedAt: string;
 };
@@ -18,6 +20,10 @@ export type Floor = {
   id: string; projectId: string; name: string; order: number;
   planAssetId?: string; displayWidth: number;
   sourcePage?: number; createdAt: string; updatedAt: string;
+  /** Prefix of this floor's finding references (G-001, L1-001, Roof-001). Empty: taken from the floor name. */
+  code?: string;
+  /** Next finding number on this floor, for references starting `numberedAs` (a new prefix starts again at 1). */
+  nextFindingNumber?: number; numberedAs?: string;
 };
 export type Finding = {
   id: string; projectId: string; floorId: string; reference: string;
@@ -67,9 +73,16 @@ export const LIMITS = {
   maxPlanBytes: 50 * 1024 * 1024,
   maxPlanMegapixels: 20,
   maxPhotoBytes: 20 * 1024 * 1024,
-  planReportEdge: 4096,
-  planViewerEdge: 2048,
+  /** Plans: as sharp as a phone can safely hold (MAX_CANVAS_PIXELS caps the area, e.g. ~4860×3440 for an A-size sheet). */
+  planReportEdge: 6144,
+  planViewerEdge: 3072,
+  maxCanvasPixels: 16_000_000,
   photoReportEdge: 2560,
+  /** Stored photo: long edge and JPEG quality. One image serves viewing, the report and sync (originals are not kept). */
+  photoStoreEdge: 1920,
+  photoStoreQuality: 0.75,
+  storageBudgetBytes: 1024 * 1024 * 1024,
+  typicalPhotoBytes: 350 * 1024,
   thumbEdge: 256,
   maxBackupExpandedBytes: 1024 * 1024 * 1024,
   pdfPreviewPageLimit: 60,

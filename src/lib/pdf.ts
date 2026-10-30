@@ -18,6 +18,11 @@ async function lib() {
 export type LoadedPdf = {
   numPages: number;
   renderPage(page: number, maxEdge: number, signal?: AbortSignal): Promise<HTMLCanvasElement>;
+  /**
+   * Render part of a page, given as a rectangle in page-relative coordinates (0..1, same orientation as renderPage),
+   * into an outW × outH canvas — vector-sharp at any zoom.
+   */
+  renderRegion(page: number, r: { u0: number; v0: number; u1: number; v1: number }, outW: number, outH: number, signal?: AbortSignal): Promise<HTMLCanvasElement>;
   destroy(): void;
 };
 
@@ -36,8 +41,8 @@ export async function loadPdf(file: Blob, name: string): Promise<LoadedPdf> {
       if (page < 1 || page > doc.numPages) throw new ImportError(`Page ${page} does not exist.`);
       const p = await doc.getPage(page);
       const v1 = p.getViewport({ scale: 1 });
-      const scale = maxEdge / Math.max(v1.width, v1.height);
-      if ((v1.width * scale * v1.height * scale) / 1e6 > LIMITS.maxPlanMegapixels * 1.2) throw new ImportError('This PDF page is too large to rasterise safely.');
+      // As large as asked, but within the canvas area mobile browsers allow (vector line work stays crisp).
+      const scale = Math.min(maxEdge / Math.max(v1.width, v1.height), Math.sqrt(LIMITS.maxCanvasPixels / (v1.width * v1.height)));
       const vp = p.getViewport({ scale });
       const canvas = newCanvas(vp.width, vp.height);
       const ctx = canvas.getContext('2d');
@@ -50,6 +55,20 @@ export async function loadPdf(file: Blob, name: string): Promise<LoadedPdf> {
         throw new ImportError(`Page ${page} could not be rendered (${(e as Error).message}).`);
       }
       p.cleanup();
+      return canvas;
+    },
+    async renderRegion(page, r, outW, outH, signal) {
+      const p = await doc.getPage(page);
+      const v1 = p.getViewport({ scale: 1 });
+      const scale = outW / ((r.u1 - r.u0) * v1.width);
+      const vp = p.getViewport({ scale, offsetX: -r.u0 * v1.width * scale, offsetY: -r.v0 * v1.height * scale });
+      const canvas = newCanvas(outW, outH);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new ImportError('Canvas is unavailable in this browser.');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const task = p.render({ canvasContext: ctx, viewport: vp });
+      signal?.addEventListener('abort', () => task.cancel(), { once: true });
+      try { await task.promise; } finally { p.cleanup(); }
       return canvas;
     },
     destroy() { void doc.destroy(); },

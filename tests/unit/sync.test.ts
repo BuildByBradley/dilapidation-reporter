@@ -1,0 +1,335 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+import { InspectorDb, useDb as selectDb } from '../../src/data/db';
+import * as repo from '../../src/data/repo';
+import { resetSaveState } from '../../src/data/saveStatus';
+import { SyncEngine, hashRow, stableJson, type Kind, type RecordRow, type Remote, type RemoteRecord, type SyncStatus } from '../../src/sync/engine';
+
+/** In-memory stand-in for Supabase: one records table, one file bucket, a live feed. */
+class FakeCloud {
+  records = new Map<string, RemoteRecord>();
+  files = new Map<string, Blob>();
+  subs = new Set<(r: RemoteRecord) => void>();
+  clock = Date.parse('2026-10-15T10:00:00Z');
+  online = true;
+  /** Simulated refusals: return an error message to refuse an upload. */
+  refuseBlob: (id: string) => string | null = () => null;
+  refuseRecord: (r: RecordRow) => string | null = () => null;
+  /** Simulated signal drops: the next N uploads fail with a network error. */
+  drops = 0;
+  /** Download latency (ms) and the most downloads seen running at once. */
+  downloadMs = 0; downloading = 0; maxDownloading = 0;
+  remote(): Remote {
+    const self = this; // eslint-disable-line @typescript-eslint/no-this-alias
+    const check = () => { if (!self.online) throw new Error('network down'); };
+    return {
+      async upsert(rows: RecordRow[]) {
+        check();
+        if (self.drops > 0) { self.drops--; throw new TypeError('Load failed'); }
+        for (const r of rows) { const why = self.refuseRecord(r); if (why) throw new Error(why); }
+        for (const r of rows) {
+          const rec: RemoteRecord = { ...structuredClone(r), updated_at: new Date(++self.clock).toISOString() };
+          self.records.set(`${r.kind}:${r.id}`, rec);
+          self.subs.forEach((s) => s(structuredClone(rec)));
+        }
+      },
+      async fetchSince(since) { check(); return [...self.records.values()].filter((r) => !since || r.updated_at > since).map((r) => structuredClone(r)); },
+      async fetchOne(kind: Kind, id) { check(); const r = self.records.get(`${kind}:${id}`); return r ? structuredClone(r) : null; },
+      async uploadBlob(id, _p, b) {
+        check();
+        if (self.drops > 0) { self.drops--; throw new TypeError('Load failed'); }
+        const why = self.refuseBlob(id); if (why) throw new Error(why);
+        self.files.set(id, b);
+      },
+      async downloadBlob(id) {
+        check();
+        self.downloading++; self.maxDownloading = Math.max(self.maxDownloading, self.downloading);
+        if (self.downloadMs) await new Promise((r) => setTimeout(r, self.downloadMs));
+        self.downloading--;
+        return self.files.get(id) ?? null;
+      },
+      async deleteBlobs(items) { check(); items.forEach((x) => self.files.delete(x.id)); },
+      subscribe(on, onLive) { self.subs.add(on); onLive(true); return () => self.subs.delete(on); },
+    };
+  }
+}
+
+const img = (n: number): repo.ProcessedImage => ({
+  filename: `f${n}.png`, mime: 'image/png', width: 400, height: 300,
+  original: new Blob([new Uint8Array([1, n])]), display: new Blob([new Uint8Array([2, n])]), thumbnail: new Blob([new Uint8Array([3, n])]),
+});
+
+let n = 0;
+let cloud: FakeCloud;
+const dbs: InspectorDb[] = [];
+function device(name: string) {
+  const db = new InspectorDb(`sync-${name}-${++n}`);
+  dbs.push(db);
+  const engine = new SyncEngine(db, cloud.remote(), `${name}-${n}`, () => {}, () => cloud.online, 0);
+  return { db, engine };
+}
+/** Run repo code against one device's database. */
+async function on<T>(db: InspectorDb, fn: () => Promise<T>): Promise<T> { selectDb(db); return fn(); }
+const settle = async (...es: SyncEngine[]) => { for (let i = 0; i < 3; i++) for (const e of es) { await e.push(); await e.idle(); } };
+
+beforeEach(() => { cloud = new FakeCloud(); resetSaveState(); });
+
+describe('hashing', () => {
+  it('is stable across key order and undefined fields (jsonb round trip)', () => {
+    expect(stableJson({ b: 1, a: { d: 2, c: undefined } })).toBe('{"a":{"d":2},"b":1}');
+    expect(hashRow({ a: 1, b: 'x', u: undefined })).toBe(hashRow(JSON.parse('{"b":"x","a":1}')));
+    expect(hashRow({ a: 1 })).not.toBe(hashRow({ a: 2 }));
+  });
+});
+
+describe('phone → PC live sync', () => {
+  it('a project, plan, finding and photo logged on the phone appear on the PC', async () => {
+    const phone = device('phone'), pc = device('pc');
+    await pc.engine.start();
+    const { p, floor, finding } = await on(phone.db, async () => {
+      const p = await repo.createProject({ name: 'Site A' });
+      const [floor] = await repo.listFloors(p.id);
+      await repo.setFloorPlan(floor.id, img(1));
+      const cats = await repo.listCategories(p.id);
+      const finding = await repo.createFinding({ floorId: floor.id, u: 0.25, v: 0.5, categoryId: cats[0].id, title: 'Crack above door' });
+      await repo.addPhoto(finding.id, img(2), 'close-up');
+      return { p, floor, finding };
+    });
+    await phone.engine.start();
+    await settle(phone.engine, pc.engine);
+
+    expect((await pc.db.projects.get(p.id))?.name).toBe('Site A');
+    const pcFloor = await pc.db.floors.get(floor.id);
+    const asset = await pc.db.assets.get(pcFloor!.planAssetId!);
+    expect(await pc.db.blobs.get(asset!.displayBlobId)).toBeTruthy();
+    expect((await pc.db.findings.get(finding.id))?.title).toBe('Crack above door');
+    const photos = await pc.db.photos.where('findingId').equals(finding.id).toArray();
+    expect(photos).toHaveLength(1);
+    const pAsset = await pc.db.assets.get(photos[0].assetId);
+    expect(await pc.db.blobs.get(pAsset!.thumbnailBlobId)).toBeTruthy();
+
+    // Live edit after the initial sync
+    await on(phone.db, () => repo.updateFinding(finding.id, { title: 'Crack above door (widened)' }));
+    await settle(phone.engine, pc.engine);
+    expect((await pc.db.findings.get(finding.id))?.title).toBe('Crack above door (widened)');
+
+    // Deleting a finding on the PC removes it (and its photo files) on the phone
+    await on(pc.db, () => repo.deleteFinding(finding.id));
+    await settle(pc.engine, phone.engine);
+    expect(await phone.db.findings.get(finding.id)).toBeUndefined();
+    expect(await phone.db.photos.where('findingId').equals(finding.id).count()).toBe(0);
+    expect(cloud.files.has(pAsset!.thumbnailBlobId)).toBe(false);
+    phone.engine.stop(); pc.engine.stop();
+  });
+
+  it('changes made offline wait, then upload when the connection returns; a late device catches up', async () => {
+    const phone = device('phone');
+    await phone.engine.start();
+    cloud.online = false;
+    const p = await on(phone.db, () => repo.createProject({ name: 'No signal' }));
+    await phone.engine.push();
+    expect(cloud.records.size).toBe(0);
+    cloud.online = true;
+    await phone.engine.push();
+    expect(cloud.records.get(`projects:${p.id}`)?.data?.name).toBe('No signal');
+
+    const pc = device('pc');
+    await pc.engine.start(); // not running while the phone worked: catches up from the cloud
+    await pc.engine.idle();
+    expect((await pc.db.projects.get(p.id))?.name).toBe('No signal');
+    expect(await pc.db.floors.where('projectId').equals(p.id).count()).toBe(5);
+    phone.engine.stop(); pc.engine.stop();
+  });
+
+  it('an unsynced local edit is not overwritten by an older incoming change', async () => {
+    const phone = device('phone'), pc = device('pc');
+    const p = await on(phone.db, () => repo.createProject({ name: 'Original' }));
+    await phone.engine.start(); await pc.engine.start(); await settle(phone.engine, pc.engine);
+    pc.engine.stop(); // PC goes quiet with a pending edit
+    await on(pc.db, () => repo.updateProject(p.id, { name: 'PC edit' }));
+    await on(phone.db, () => repo.updateProject(p.id, { name: 'Phone edit' }));
+    await settle(phone.engine);
+    const pc2 = new SyncEngine(pc.db, cloud.remote(), 'pc-again', () => {}, () => true, 0);
+    await pc2.start(); await pc2.idle();
+    expect((await pc.db.projects.get(p.id))?.name).toBe('PC edit');
+    expect(cloud.records.get(`projects:${p.id}`)?.data?.name).toBe('PC edit');
+    phone.engine.stop(); pc2.stop();
+  });
+
+  it('a record that arrives before its file is in the cloud gets the file on a later pull', async () => {
+    const phone = device('phone'), pc = device('pc');
+    const { asset } = await on(phone.db, async () => {
+      const p = await repo.createProject({ name: 'Race' });
+      const [floor] = await repo.listFloors(p.id);
+      const asset = await repo.setFloorPlan(floor.id, img(7));
+      return { asset };
+    });
+    await phone.engine.start(); await phone.engine.idle();
+    const held = cloud.files.get(asset.displayBlobId)!;
+    cloud.files.delete(asset.displayBlobId); // file not visible yet
+    await pc.engine.start(); await pc.engine.idle();
+    expect(await pc.db.assets.get(asset.id)).toBeTruthy();
+    expect(await pc.db.blobs.get(asset.displayBlobId)).toBeUndefined();
+    cloud.files.set(asset.displayBlobId, held);
+    await pc.engine.pull(); await pc.engine.idle();
+    expect(await pc.db.blobs.get(asset.displayBlobId)).toBeTruthy();
+    expect((await pc.db.meta.get('missingBlobs'))?.value).toBe('{}');
+    phone.engine.stop(); pc.engine.stop();
+  });
+
+  it('manual mode uses no network until Sync now, and reports how much is waiting', async () => {
+    const statuses: { kind: string; pending?: number }[] = [];
+    const db = new InspectorDb(`sync-manual-${++n}`);
+    let calls = 0;
+    const base = cloud.remote();
+    const counting: Remote = Object.fromEntries(Object.entries(base).map(([k, f]) => [k, (...a: unknown[]) => { calls++; return (f as (...x: unknown[]) => unknown)(...a); }])) as unknown as Remote;
+    const phone = new SyncEngine(db, counting, 'phone-manual', (st) => statuses.push(st as { kind: string; pending?: number }), () => true, 0, false);
+    await phone.start();
+    await on(db, () => repo.createProject({ name: 'Quiet' }));
+    expect(await phone.count()).toBe(1 + 5 + 8); // project, 5 floors, 8 starter categories
+    expect(calls).toBe(0);
+    expect(cloud.records.size).toBe(0);
+    expect(statuses.at(-1)).toMatchObject({ kind: 'manual', pending: 14 });
+    await phone.syncNow();
+    expect(cloud.records.size).toBe(14);
+    expect(statuses.at(-1)).toMatchObject({ kind: 'manual', pending: 0 });
+    // switching to automatic starts following live
+    await phone.setAuto(true);
+    expect(statuses.at(-1)?.kind).toBe('synced');
+    phone.stop();
+  });
+
+  it('a floor added on one device appears on the other', async () => {
+    const phone = device('phone'), pc = device('pc');
+    const p = await on(phone.db, () => repo.createProject({ name: 'Tall' }));
+    await phone.engine.start(); await pc.engine.start();
+    const f = await on(phone.db, () => repo.addFloor(p.id));
+    expect(f.name).toBe('Level 5');
+    await settle(phone.engine, pc.engine);
+    expect((await pc.db.floors.where('projectId').equals(p.id).sortBy('order')).map((x) => x.name).at(-1)).toBe('Level 5');
+    await on(pc.db, () => repo.deleteFloor(f.id));
+    await settle(pc.engine, phone.engine);
+    expect(await phone.db.floors.get(f.id)).toBeUndefined();
+    phone.engine.stop(); pc.engine.stop();
+  });
+
+  it('leaving a shared project removes it from this device without deleting it for others', async () => {
+    const owner = device('owner'), member = device('member');
+    const p = await on(owner.db, () => repo.createProject({ name: 'Shared block' }));
+    await owner.engine.start(); await member.engine.start(); await settle(owner.engine, member.engine);
+    expect(await member.db.projects.get(p.id)).toBeTruthy();
+    await on(member.db, () => repo.removeProjectLocally(p.id));
+    await settle(member.engine, owner.engine);
+    expect(await member.db.projects.get(p.id)).toBeUndefined();
+    expect(cloud.records.get(`projects:${p.id}`)?.deleted).toBe(false);
+    expect([...cloud.records.values()].some((r) => r.deleted)).toBe(false);
+    expect(await owner.db.projects.get(p.id)).toBeTruthy();
+    owner.engine.stop(); member.engine.stop();
+  });
+
+  it('a photo whose finding event was missed fetches the finding first', async () => {
+    const phone = device('phone'), pc = device('pc');
+    await pc.engine.start();
+    const { f } = await on(phone.db, async () => {
+      const p = await repo.createProject({ name: 'Gap' });
+      const [floor] = await repo.listFloors(p.id);
+      await repo.setFloorPlan(floor.id, img(3));
+      const cats = await repo.listCategories(p.id);
+      const f = await repo.createFinding({ floorId: floor.id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: 'Gap test' });
+      return { f };
+    });
+    await phone.engine.start(); await settle(phone.engine, pc.engine);
+    await pc.db.findings.delete(f.id); await pc.db.sync.delete(`findings:${f.id}`); // as if its live event never arrived
+    await on(phone.db, () => repo.addPhoto(f.id, img(4)));
+    await settle(phone.engine, pc.engine);
+    expect((await pc.db.findings.get(f.id))?.title).toBe('Gap test');
+    expect(await pc.db.photos.where('findingId').equals(f.id).count()).toBe(1);
+    phone.engine.stop(); pc.engine.stop();
+  });
+
+  it('one item that cannot upload does not hold back the rest; the reason is reported in plain words', async () => {
+    const statuses: SyncStatus[] = [];
+    const db = new InspectorDb(`sync-phone-${++n}`); dbs.push(db);
+    const phone = new SyncEngine(db, cloud.remote(), 'phone-x', (st) => statuses.push(st), () => cloud.online, 0);
+    const { good, bad, badPhotoAsset } = await on(db, async () => {
+      const p = await repo.createProject({ name: 'Site B' });
+      const [floor] = await repo.listFloors(p.id);
+      await repo.setFloorPlan(floor.id, img(5));
+      const cats = await repo.listCategories(p.id);
+      const good = await repo.createFinding({ floorId: floor.id, u: 0.2, v: 0.2, categoryId: cats[0].id, title: 'Good one' });
+      await repo.addPhoto(good.id, img(6));
+      const bad = await repo.createFinding({ floorId: floor.id, u: 0.4, v: 0.4, categoryId: cats[0].id, title: 'Unlucky one' });
+      const ph = await repo.addPhoto(bad.id, img(7));
+      return { good, bad, badPhotoAsset: (await db.assets.get(ph.assetId))! };
+    });
+    const badFile = badPhotoAsset.thumbnailBlobId;
+    cloud.refuseBlob = (id) => (id === badFile ? 'The operation couldn\u2019t be completed. (WebKitBlobResource error 1.)' : null);
+    await phone.start();
+
+    // Everything except the photo with the unreadable file went up.
+    expect(cloud.records.get(`findings:${good.id}`)).toBeTruthy();
+    expect(cloud.records.get(`findings:${bad.id}`)).toBeTruthy();
+    expect([...cloud.records.values()].filter((r) => r.kind === 'photos')).toHaveLength(1);
+    expect(cloud.records.has(`assets:${badPhotoAsset.id}`)).toBe(false);
+    const last = statuses.at(-1)!;
+    expect(last.kind).toBe('error');
+    if (last.kind === 'error') {
+      expect(last.problems?.[0]).toMatch(/could not be read by the browser/);
+      expect(last.pending).toBeGreaterThan(0);
+    }
+
+    // Next sync, once the file can be sent, finishes the job.
+    cloud.refuseBlob = () => null;
+    await phone.syncNow();
+    expect([...cloud.records.values()].filter((r) => r.kind === 'photos')).toHaveLength(2);
+    expect(statuses.at(-1)!.kind).toBe('synced');
+    phone.stop();
+  });
+
+  it('a refused project is reported as an access problem; a signal drop is retried without bothering the user', async () => {
+    const statuses: SyncStatus[] = [];
+    const db = new InspectorDb(`sync-phone-${++n}`); dbs.push(db);
+    const phone = new SyncEngine(db, cloud.remote(), 'phone-y', (st) => statuses.push(st), () => cloud.online, 0, false);
+    const p = await on(db, () => repo.createProject({ name: 'Not mine' }));
+    cloud.refuseRecord = (r) => (r.project_id === p.id ? 'new row violates row-level security policy for table "records"' : null);
+    await phone.start();
+    await phone.syncNow();
+    const st = statuses.at(-1)!;
+    expect(st.kind).toBe('error');
+    if (st.kind === 'error') expect(st.message).toMatch(/not allowed to change this project/);
+    cloud.refuseRecord = () => null;
+    cloud.drops = 1; // one dropped request: retried quietly
+    await phone.syncNow();
+    expect(statuses.at(-1)!.kind).toBe('manual');
+    expect(cloud.records.get(`projects:${p.id}`)).toBeTruthy();
+    phone.stop();
+  }, 15000);
+
+  it('a device catching up downloads files several at a time and reports how many are left', async () => {
+    const phone = device('phone');
+    const p = await on(phone.db, async () => {
+      const p = await repo.createProject({ name: 'Many photos' });
+      const [floor] = await repo.listFloors(p.id);
+      await repo.setFloorPlan(floor.id, img(1));
+      const cats = await repo.listCategories(p.id);
+      for (let i = 0; i < 6; i++) {
+        const f = await repo.createFinding({ floorId: floor.id, u: 0.1 + i / 10, v: 0.5, categoryId: cats[0].id, title: `F${i}` });
+        for (let k = 0; k < 3; k++) await repo.addPhoto(f.id, img(10 + i * 3 + k));
+      }
+      return p;
+    });
+    await phone.engine.start(); await settle(phone.engine);
+    cloud.downloadMs = 40;
+    const statuses: SyncStatus[] = [];
+    const pcDb = new InspectorDb(`sync-pc-${++n}`); dbs.push(pcDb);
+    const pc = new SyncEngine(pcDb, cloud.remote(), 'pc-z', (st) => statuses.push(st), () => cloud.online, 0, false);
+    const t0 = Date.now();
+    await pc.start(); await pc.syncNow(); await pc.idle();
+    const files = (await phone.db.blobs.count());
+    expect(await pcDb.blobs.count()).toBe(files);
+    expect(cloud.maxDownloading).toBeGreaterThan(3);
+    expect(Date.now() - t0).toBeLessThan(files * 40 * 0.6); // well under one-by-one time
+    expect(statuses.some((st) => st.kind === 'syncing' && st.pending > 10)).toBe(true);
+    expect((await pcDb.photos.where('projectId').equals(p.id).count())).toBe(18);
+    phone.engine.stop(); pc.stop();
+  });
+});
