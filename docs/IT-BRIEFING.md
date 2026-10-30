@@ -112,6 +112,24 @@ All code was written by the AI tool. The history contains no human code review a
 
 **Never tested:** real phones and tablets, Safari, Firefox, real camera hardware, printing outside Chromium, assistive technology, or the Supabase rules against the live database (they were read and tested with mocks, not attacked). No penetration test; no independent code review.
 
+### Real-world use so far
+
+The owner has used the app on one complete live project (a multi-storey commercial building, anonymised here), 19 to 22 Oct 2026:
+
+| Measure | Figure (from the project's CSV export and report) |
+|---|---|
+| Floors with plans | 9 |
+| Findings (pins) recorded | 247 |
+| Photos attached | 513 |
+| Capture period | about 3 days (19 to 22 Oct) |
+| Output | Conditioning Report, edited by the owner to suit the client's needs, plus CSV |
+
+The owner reports that it ran on phone, tablet and computer; that several people captured on the same project at the same time; that
+the project was shared with colleagues who signed in to view it; and that work captured on a phone appeared on the computer after
+signing in. These are the owner's observations of normal use, not results of a formal test, and no one has independently verified
+them. This is the strongest evidence that the app works in the field, and it also means **real client data is already in the cloud
+project on the owner's account**, which is why gaps 1, 2 and 5 below are the priority.
+
 ## 7. Gaps IT will likely raise, with proposed responses
 
 | # | Gap | Proposed response |
