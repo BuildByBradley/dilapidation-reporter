@@ -112,6 +112,18 @@ All code was written by the AI tool. The history contains no human code review a
 
 **Never tested:** real phones and tablets, Safari, Firefox, real camera hardware, printing outside Chromium, assistive technology, or the Supabase rules against the live database (they were read and tested with mocks, not attacked). No penetration test; no independent code review.
 
+### Hosting facts (from the Supabase dashboard, 2 Nov 2026)
+
+| Item | Value |
+|---|---|
+| Organisation / plan | Owner's personal organisation, Free plan |
+| Project region | Frankfurt, Germany (eu-central-1) |
+| Compute | Nano (smallest) |
+| Usage this billing cycle | Database 33 of 500 MB; file storage 0.17 of 1 GB; 8 monthly active users; data transfer 0.83 of 5 GB |
+| Other | A second, older project in the same organisation is paused (unrelated to this app) |
+
+The 8 active users show the app is already used by more people than the owner, so the pilot is effectively under way.
+
 ### Real-world use so far
 
 The owner has used the app on one complete live project (a multi-storey commercial building, anonymised here), 19 to 22 Oct 2026:
@@ -135,7 +147,8 @@ project on the owner's account**, which is why gaps 1, 2 and 5 below are the pri
 | # | Gap | Proposed response |
 |---|---|---|
 | 1 | Code and site are on the owner's personal GitHub account; repository and site are **public** | Move to a private repository in a company organisation; host on company infrastructure |
-| 2 | Backend is a Supabase project on the owner's account; plan, region and admin access undocumented **[confirm]** | Company-owned project in an approved region; documented admins; POPIA / data-residency decision |
+| 2 | Backend is a Supabase project on the owner's personal organisation, **Free plan**, Frankfurt (eu-central-1) region, smallest compute size. Data is stored outside South Africa | Company-owned project on an approved paid plan; POPIA review of cross-border storage; documented admins |
+| 2a | **Free plan limits:** projects are paused after a period of inactivity, no automatic backups or uptime guarantee, 500 MB database and 1 GB file storage | Move to a paid plan before relying on it; set up scheduled backups; the in-app backup .zip is the only safety net today |
 | 3 | Sign-up appears open to anyone with the URL; e-mail confirmation unknown **[confirm]**; 6-character minimum password | Restrict sign-up to company e-mail domain or SSO; stronger password policy |
 | 4 | Two-factor authentication (raised by IT): built, **not yet enabled or tested live**; GitHub, Supabase and Anthropic accounts also need it | Enable per section 8; turn on for the owner accounts now |
 | 5 | Client data (addresses, names, property photos) in the cloud with no app-level encryption; platform admins can read it | Classify the data; confirm encryption at rest and admin-access policy |
