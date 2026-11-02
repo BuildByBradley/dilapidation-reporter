@@ -16,14 +16,22 @@ const friendly = (m: string) =>
   : /disabled|not enabled|mfa.*enroll/i.test(m) ? 'Two-factor sign-in is not switched on for this project yet. Ask the administrator to enable authenticator-app (TOTP) MFA in Supabase.'
   : m;
 
-/** The verified authenticator this account must use at sign-in, or null when no code is needed. */
-export async function pendingFactor(client: SupabaseClient): Promise<string | null> {
+/**
+ * What this session must do before the app may sync (two-factor is compulsory):
+ *  - nothing: the session has already passed its code;
+ *  - enter a code: the account has an authenticator but this sign-in has not used it yet;
+ *  - set up: the account has no authenticator yet, so it must add one now.
+ */
+export type MfaStep = { step: 'code'; factorId: string } | { step: 'setup' } | null;
+export async function mfaStep(client: SupabaseClient): Promise<MfaStep> {
   const lvl = await client.auth.mfa.getAuthenticatorAssuranceLevel();
   fail(lvl.error);
-  if (lvl.data?.nextLevel !== 'aal2' || lvl.data.currentLevel === 'aal2') return null;
+  if (lvl.data?.currentLevel === 'aal2') return null;
+  if (lvl.data?.nextLevel !== 'aal2') return { step: 'setup' }; // no confirmed authenticator on the account
   const f = await client.auth.mfa.listFactors();
   fail(f.error);
-  return f.data?.totp.find((x) => x.status === 'verified')?.id ?? null;
+  const id = f.data?.totp.find((x) => x.status === 'verified')?.id;
+  return id ? { step: 'code', factorId: id } : { step: 'setup' };
 }
 
 /** Completes sign-in: checks the 6-digit code against the account's authenticator. */

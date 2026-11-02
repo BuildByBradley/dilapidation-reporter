@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { confirmEnrolment, listAuthenticators, pendingFactor, removeAuthenticator, startEnrolment, verifySignIn } from '../../src/sync/mfa';
+import { confirmEnrolment, listAuthenticators, mfaStep, removeAuthenticator, startEnrolment, verifySignIn } from '../../src/sync/mfa';
 
 type Fx = { id: string; status: 'verified' | 'unverified'; factor_type?: string; friendly_name?: string };
 function fake(o: { level?: { currentLevel: string; nextLevel: string }; factors?: Fx[]; verifyError?: string } = {}) {
@@ -15,16 +15,16 @@ function fake(o: { level?: { currentLevel: string; nextLevel: string }; factors?
 }
 
 describe('two-factor sign-in', () => {
-  it('asks for no code when the account has no authenticator', async () => {
-    expect(await pendingFactor(fake().client)).toBeNull();
+  it('sends an account with no authenticator to the compulsory set-up', async () => {
+    expect(await mfaStep(fake().client)).toEqual({ step: 'setup' });
   });
   it('asks for a code when the account has one and the session has not passed it yet', async () => {
     const { client } = fake({ level: { currentLevel: 'aal1', nextLevel: 'aal2' }, factors: [{ id: 'f1', status: 'verified' }] });
-    expect(await pendingFactor(client)).toBe('f1');
+    expect(await mfaStep(client)).toEqual({ step: 'code', factorId: 'f1' });
   });
   it('asks for nothing once the code has been entered', async () => {
     const { client } = fake({ level: { currentLevel: 'aal2', nextLevel: 'aal2' }, factors: [{ id: 'f1', status: 'verified' }] });
-    expect(await pendingFactor(client)).toBeNull();
+    expect(await mfaStep(client)).toBeNull();
   });
   it('strips spaces from the code and gives a plain message for a wrong one', async () => {
     const ok = fake();
