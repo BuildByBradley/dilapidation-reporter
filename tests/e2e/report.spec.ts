@@ -18,7 +18,7 @@ async function addBulk(page: Page, n: number) {
     const tx = db.transaction(['findings', 'photos', 'projects'], 'readwrite');
     const long = 'Long observation text that wraps across several lines to exercise pagination and overflow handling. '.repeat(6);
     for (let i = 0; i < n; i++) {
-      const num = project.nextFindingNumber + i, id = crypto.randomUUID();
+      const num = 9 + i, id = crypto.randomUUID();
       tx.objectStore('findings').add({ id, projectId: project.id, floorId: floors[i % 5].id, reference: `D-${String(num).padStart(3, '0')}`, u: ((i * 37) % 100) / 100 * 0.9 + 0.05, v: ((i * 53) % 100) / 100 * 0.9 + 0.05, categoryId: cats[i % cats.length].id, severity: ['minor', 'moderate', 'major', 'not_assessed'][i % 4], title: `BULK finding ${i + 1} <b>not html</b>`, description: `${long}END-${num}`, locationNotes: `Loc notes ${i}`, locationNeedsReview: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
       for (let k = 0; k < 2; k++) tx.objectStore('photos').add({ id: crypto.randomUUID(), findingId: id, projectId: project.id, assetId: photoAssets[(i + k) % photoAssets.length].id, caption: `BULKCAP-${num}-${k}`, order: k, isCover: k === 0, createdAt: new Date().toISOString() });
     }
@@ -40,11 +40,11 @@ test('A19 full report ignores workspace filters and matches stored data; escapes
   await expect(page.locator('.report-photo')).toHaveCount(photos.length);
   const text = await page.getByTestId('report').innerText();
   for (const f of findings) { expect(text).toContain(f.reference); expect(text).toContain(f.title); }
-  expect(text).toContain('regardless of any filters');
-  expect(text).toMatch(/prototype inspection record/i);
+  expect(text).toMatch(/Conditioning Report/);
+  expect(text).not.toMatch(/prototype inspection record|regardless of any filters|No general notes|Key findings|By severity/i);
   expect(text).toContain('Floor plans');
-  // summary counts derived from data: 8 findings, 2 major
-  await expect(page.locator('.summary-grid table').nth(2).locator('tr', { hasText: 'Major' })).toContainText('2');
+  // summary counts derived from data: 8 findings, by floor and by category only
+  await expect(page.locator('.summary-grid table')).toHaveCount(2);
   await expect(page.locator('.summary-grid table').first().locator('tr.total')).toContainText('8');
   // every floor has a plan figure with its pins
   await expect(page.locator('.plan-img')).toHaveCount(5);
@@ -90,8 +90,7 @@ test('A20 printing a long report: legible pages, no clipped content, workspace c
   expect(pages).toBeGreaterThan(10);
   expect(info1).toMatch(/A4|595\.\d+ x 841\.\d+/);
   const txt = execFileSync('pdftotext', ['-layout', pdfPath, '-']).toString();
-  expect(txt).toMatch(/dilapidation inspection report/i);
-  expect(txt).toMatch(/prototype inspection record/i);
+  expect(txt).toMatch(/Conditioning Report/);
   expect(txt).not.toMatch(/Print \/ Save as PDF|Export findings CSV|Back to inspection/); // toolbar is not printed
   const flat = txt.replace(/\s+/g, ' ');
   for (let i = 0; i < 40; i++) { const n = 9 + i; expect(flat, `finding D-${n}`).toContain(`END-${n}`); }

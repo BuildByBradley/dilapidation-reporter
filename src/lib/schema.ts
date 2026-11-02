@@ -9,7 +9,7 @@ export const manifestSchema = z.object({
   exportedAt: str,
   project: z.object({
     id: str, name: str, siteName: str, address: str, client: str, inspector: str, inspectionDate: str,
-    reference: str, notes: str, nextFindingNumber: z.number().int().min(1), isSample: z.boolean().optional(), createdAt: str, updatedAt: str,
+    reference: str, notes: str, summary: str.optional(), nextFindingNumber: z.number().int().min(1), isSample: z.boolean().optional(), createdAt: str, updatedAt: str,
   }),
   floors: z.array(z.object({
     id: str, projectId: str, name: str, order: z.number().int(), planAssetId: str.optional(),

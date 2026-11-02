@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { csvCell, csvRow } from '../../src/lib/csv';
 import { exifOrientation, orientationTransform, orientedSize, sniffDimensions } from '../../src/lib/orientation';
-import { formatReference } from '../../src/lib/ids';
+import { floorCode, formatReference, referenceNumber, referencePrefix } from '../../src/lib/ids';
 
 describe('csv', () => {
   it('escapes commas, quotes and newlines', () => {
@@ -48,5 +48,14 @@ describe('orientation', () => {
   });
 });
 describe('references', () => {
-  it('formats', () => { expect(formatReference(7)).toBe('D-007'); expect(formatReference(1234)).toBe('D-1234'); });
+  it('formats', () => { expect(formatReference(7)).toBe('D-007'); expect(formatReference(1234)).toBe('D-1234'); expect(formatReference(3, 'L1')).toBe('L1-003'); });
+  it('reads the number and prefix back', () => {
+    expect(referenceNumber('L1-007')).toBe(7); expect(referenceNumber('D-091')).toBe(91); expect(referenceNumber('Roof-012')).toBe(12);
+    expect(referencePrefix('L1-007')).toBe('L1');
+  });
+  it('suggests a floor code from the name', () => {
+    const cases: [string, string][] = [['Ground', 'G'], ['Level Ground', 'G'], ['Ground floor', 'G'], ['GF', 'G'], ['Level 1', 'L1'], ['Level 4', 'L4'],
+      ['1st floor', 'L1'], ['Floor 12', 'L12'], ['Roof', 'Roof'], ['Roof level', 'Roof'], ['Basement', 'B1'], ['Basement 2', 'B2'], ['Mezzanine', 'M'], ['Plant room', 'PR']];
+    for (const [name, code] of cases) expect([name, floorCode(name)]).toEqual([name, code]);
+  });
 });

@@ -4,7 +4,7 @@ import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
 
 export default tseslint.config(
-  { ignores: ['dist', 'dist-*', 'node_modules', 'test-results', 'playwright-report', 'public'] },
+  { ignores: ['dist', 'dist-*', 'node_modules', 'test-results', 'playwright-report', 'public', 'supabase/functions/**/index.ts'] }, // edge functions are Deno: checked with `deno check`
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

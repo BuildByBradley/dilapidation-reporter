@@ -103,15 +103,15 @@ test('A18 replacing a plan with retained pins flags them in the workspace, edito
   await expect(page.getByTestId('review-banner')).toContainText('2 findings need a location review');
   const flagged = (await dbAll(page, 'findings')).filter((f) => f.locationNeedsReview);
   expect(flagged).toHaveLength(2);
-  expect(flagged.map((f) => f.reference).sort()).toEqual(['D-001', 'D-002']);
+  expect(flagged.map((f) => f.reference).sort()).toEqual(['G-001', 'G-002']);
   // positions are unchanged ("normalised positions kept")
-  await page.getByTestId('finding-row').filter({ hasText: 'D-001' }).click();
+  await page.getByTestId('finding-row').filter({ hasText: 'G-001' }).click();
   await expect(page.getByTestId('review-warning')).toBeVisible();
   await page.getByRole('button', { name: 'Report' }).click();
-  await expect(page.getByTestId('report-review-warning')).toContainText('D-001, D-002');
-  await expect(page.getByTestId('report-finding').filter({ hasText: 'D-001' })).toContainText('Location needs review');
+  await expect(page.getByTestId('report-review-warning')).toContainText('G-001, G-002');
+  await expect(page.getByTestId('report-finding').filter({ hasText: 'G-001' })).toContainText('Location needs review');
   await page.getByRole('button', { name: /Back to inspection/ }).click();
-  await page.getByTestId('finding-row').filter({ hasText: 'D-001' }).click();
+  await page.getByTestId('finding-row').filter({ hasText: 'G-001' }).click();
   await page.getByRole('button', { name: 'Mark location as reviewed' }).click();
   await expect(page.getByTestId('review-banner')).toContainText('1 finding needs');
   // replace-and-remove path

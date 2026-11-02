@@ -19,6 +19,7 @@
     "build:pages": "vite build --base ./ --outDir dist-pages --emptyOutDir"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
     "dexie": "^4.4.6",
     "fflate": "^0.8.3",
     "pdfjs-dist": "^4.10.38",

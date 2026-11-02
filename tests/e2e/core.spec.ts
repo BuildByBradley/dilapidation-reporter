@@ -182,7 +182,7 @@ test.describe('stack, isolation and gestures (A04-A08, A21)', () => {
     await isolate(page, 'Level 2');
     await settle(page);
     const fid = (await state(page)).floorId!;
-    await page.getByTestId('finding-row').filter({ hasText: 'D-005' }).click();
+    await page.getByTestId('finding-row').filter({ hasText: 'L2-001' }).click();
     const before = await dbAll(page, 'findings');
     await drag(page, [200, 300], [320, 300]); // rotate in 3D
     const s3 = await state(page);
@@ -199,7 +199,7 @@ test.describe('stack, isolation and gestures (A04-A08, A21)', () => {
     s2 = await state(page);
     expect(s2.camera.zoom).toBeCloseTo(s2b.camera.zoom, 4);
     expect(s2.floorId).toBe(fid);
-    await expect(page.getByTestId('finding-editor')).toContainText('D-005');
+    await expect(page.getByTestId('finding-editor')).toContainText('L2-001');
     expect(await dbAll(page, 'findings')).toEqual(before);
   });
 

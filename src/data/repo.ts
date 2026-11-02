@@ -1,6 +1,6 @@
 import { db } from './db';
 import { tracked } from './saveStatus';
-import { formatReference, nowIso, uuid } from '../lib/ids';
+import { cleanFloorCode, floorCode, formatReference, nowIso, referenceNumber, referencePrefix, uuid } from '../lib/ids';
 import { isValidUv } from '../lib/coords';
 import {
   DEFAULT_FLOOR_NAMES, FLOOR_COUNT, STARTER_CATEGORIES,
@@ -21,7 +21,7 @@ export type ProjectBundle = {
 export class RepoError extends Error {}
 
 // ---------- projects ----------
-export type ProjectInput = Partial<Pick<Project, 'name' | 'siteName' | 'address' | 'client' | 'inspector' | 'inspectionDate' | 'reference' | 'notes'>>;
+export type ProjectInput = Partial<Pick<Project, 'name' | 'siteName' | 'address' | 'client' | 'inspector' | 'inspectionDate' | 'reference' | 'notes' | 'summary'>>;
 
 export async function createProject(input: ProjectInput = {}, opts: { isSample?: boolean } = {}): Promise<Project> {
   return tracked(async () => {
@@ -67,6 +67,22 @@ export const getProject = (id: string) => db.projects.get(id);
 
 export async function deleteProject(id: string): Promise<void> {
   return tracked(() => db.transaction('rw', [db.projects, db.floors, db.findings, db.categories, db.photos, db.assets, db.blobs], async () => {
+    await Promise.all([
+      db.floors.where('projectId').equals(id).delete(), db.findings.where('projectId').equals(id).delete(),
+      db.categories.where('projectId').equals(id).delete(), db.photos.where('projectId').equals(id).delete(),
+      db.assets.where('projectId').equals(id).delete(), db.blobs.where('projectId').equals(id).delete(),
+    ]);
+    await db.projects.delete(id);
+  }));
+}
+
+/**
+ * Remove a project from this device only — nothing is deleted in the cloud (used when leaving a shared project).
+ * Its sync bookkeeping goes in the same transaction, so the sync engine does not mistake this for a deletion.
+ */
+export async function removeProjectLocally(id: string): Promise<void> {
+  return tracked(() => db.transaction('rw', [db.projects, db.floors, db.findings, db.categories, db.photos, db.assets, db.blobs, db.sync], async () => {
+    await db.sync.filter((s) => s.projectId === id).delete();
     await Promise.all([
       db.floors.where('projectId').equals(id).delete(), db.findings.where('projectId').equals(id).delete(),
       db.categories.where('projectId').equals(id).delete(), db.photos.where('projectId').equals(id).delete(),
@@ -144,10 +160,28 @@ export async function duplicateProject(id: string): Promise<Project> {
 }
 
 // ---------- floors & plans ----------
+/** Floors in display order. Ties (two floors with the same order, e.g. added on two devices) keep a stable order. */
 export async function listFloors(projectId: string): Promise<Floor[]> {
-  return db.floors.where('projectId').equals(projectId).sortBy('order');
+  const all = await db.floors.where('projectId').equals(projectId).toArray();
+  return all.sort((a, b) => a.order - b.order || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
 }
-export async function updateFloor(id: string, patch: Partial<Pick<Floor, 'name' | 'displayWidth'>>): Promise<void> {
+/**
+ * Reference prefix of each floor (in floor order): its own code, or one taken from its name. Two floors never share
+ * a prefix — a repeat gets a letter (L1, L1B).
+ */
+export function floorCodes(floors: Floor[]): Map<string, string> {
+  const out = new Map<string, string>(), used = new Set<string>();
+  for (const f of floors) {
+    const base = cleanFloorCode(f.code ?? '') || floorCode(f.name);
+    let code = base;
+    for (let i = 1; used.has(code.toUpperCase()); i++) code = base + String.fromCharCode(65 + i);
+    used.add(code.toUpperCase()); out.set(f.id, code);
+  }
+  return out;
+}
+
+export async function updateFloor(id: string, patch: Partial<Pick<Floor, 'name' | 'displayWidth' | 'code'>>): Promise<void> {
+  if (patch.code !== undefined) patch = { ...patch, code: cleanFloorCode(patch.code) };
   return tracked(async () => {
     const f = await db.floors.get(id);
     if (!f) throw new RepoError('Floor not found');
@@ -158,16 +192,42 @@ export async function updateFloor(id: string, patch: Partial<Pick<Floor, 'name' 
     await touch(f.projectId);
   });
 }
+/** Add an empty floor on top of the stack, named after the next level number. */
+export async function addFloor(projectId: string): Promise<Floor> {
+  return tracked(() => db.transaction('rw', db.floors, db.projects, async () => {
+    const all = await listFloors(projectId);
+    const names = new Set(all.map((f) => f.name.trim().toLowerCase()));
+    let n = all.length;
+    while (names.has(`level ${n}`)) n++;
+    const t = nowIso();
+    const floor: Floor = { id: uuid(), projectId, name: n === 0 ? 'Ground' : `Level ${n}`, order: (all.at(-1)?.order ?? -1) + 1, displayWidth: 100, createdAt: t, updatedAt: t };
+    await db.floors.add(floor);
+    await touch(projectId);
+    return floor;
+  }));
+}
+/** Remove a floor that has no findings (its plan, if any, goes with it). */
+export async function deleteFloor(id: string): Promise<void> {
+  return tracked(() => db.transaction('rw', [db.floors, db.findings, db.photos, db.assets, db.blobs, db.projects], async () => {
+    const f = await db.floors.get(id);
+    if (!f) return;
+    if (await db.findings.where('floorId').equals(id).count()) throw new RepoError('This floor has findings. Delete or move them first.');
+    await db.floors.delete(id);
+    if (f.planAssetId) await removeAsset(f.planAssetId);
+    await touch(f.projectId);
+  }));
+}
 /** Swap floor order with neighbour (-1 up / +1 down). */
 export async function moveFloor(id: string, dir: -1 | 1): Promise<void> {
   return tracked(() => db.transaction('rw', db.floors, db.projects, async () => {
     const f = await db.floors.get(id);
     if (!f) throw new RepoError('Floor not found');
-    const all = await db.floors.where('projectId').equals(f.projectId).sortBy('order');
+    const all = await listFloors(f.projectId);
     const i = all.findIndex((x) => x.id === id), j = i + dir;
     if (j < 0 || j >= all.length) return;
-    await db.floors.update(all[i].id, { order: all[j].order });
-    await db.floors.update(all[j].id, { order: all[i].order });
+    // Renumber the whole list: swapping two equal order values would change nothing.
+    [all[i], all[j]] = [all[j], all[i]];
+    for (const [k, x] of all.entries()) if (x.order !== k) await db.floors.update(x.id, { order: k });
     await touch(f.projectId);
   }));
 }
@@ -241,13 +301,19 @@ export async function createFinding(input: NewFinding): Promise<Finding> {
     const project = await db.projects.get(floor.projectId);
     if (!project) throw new RepoError('Project not found');
     const t = nowIso();
+    // References run per floor: G-001, G-002… on Ground, L1-001… on Level 1. Never reused.
+    const code = floorCodes(await listFloors(project.id)).get(floor.id)!;
+    const onFloor = await db.findings.where('projectId').equals(project.id).toArray();
+    const highest = Math.max(0, ...onFloor.filter((x) => referencePrefix(x.reference).toUpperCase() === code.toUpperCase()).map((x) => referenceNumber(x.reference)));
+    const number = Math.max(floor.numberedAs === code ? floor.nextFindingNumber ?? 1 : 1, highest + 1);
     const finding: Finding = {
-      id: uuid(), projectId: project.id, floorId: floor.id, reference: formatReference(project.nextFindingNumber),
+      id: uuid(), projectId: project.id, floorId: floor.id, reference: formatReference(number, code),
       u: input.u, v: input.v, categoryId: cat.id, severity: input.severity ?? 'not_assessed', title: input.title.trim(),
       description: input.description ?? '', locationNotes: input.locationNotes ?? '', locationNeedsReview: false, createdAt: t, updatedAt: t,
     };
     await db.findings.add(finding);
-    await db.projects.update(project.id, { nextFindingNumber: project.nextFindingNumber + 1, updatedAt: t });
+    await db.floors.update(floor.id, { nextFindingNumber: number + 1, numberedAs: code });
+    await db.projects.update(project.id, { updatedAt: t });
     return finding;
   }));
 }
@@ -292,7 +358,74 @@ export async function deleteFinding(id: string): Promise<void> {
     if (f) await touch(f.projectId);
   }));
 }
-export const listFindings = (projectId: string) => db.findings.where('projectId').equals(projectId).sortBy('reference');
+/**
+ * Copy a finding to other floors: same position on the plan, title, category, severity, description, notes and
+ * photos (captions, order, cover). Each copy gets the next number on its floor. The photo images are shared, not
+ * duplicated, so copies cost no extra storage or upload; editing a copy's photos later does not affect the original.
+ */
+export async function copyFindingToFloors(findingId: string, floorIds: string[]): Promise<Finding[]> {
+  return tracked(() => db.transaction('rw', [db.projects, db.floors, db.findings, db.categories, db.photos], async () => {
+    const src = await db.findings.get(findingId);
+    if (!src) throw new RepoError('Finding not found');
+    const photos = await listPhotos(findingId);
+    const out: Finding[] = [];
+    for (const floorId of floorIds) {
+      const floor = await db.floors.get(floorId);
+      if (!floor || floor.projectId !== src.projectId) throw new RepoError('Floor not found');
+      const copy = await createFinding({ floorId, u: src.u, v: src.v, categoryId: src.categoryId, title: src.title, severity: src.severity,
+        description: src.description, locationNotes: src.locationNotes });
+      const t = nowIso();
+      await db.photos.bulkAdd(photos.map((p) => ({ ...p, id: uuid(), findingId: copy.id, createdAt: t })));
+      out.push(copy);
+    }
+    return out;
+  }));
+}
+/** Findings floor by floor (in floor order), then by number. */
+export async function listFindings(projectId: string): Promise<Finding[]> {
+  const [floors, findings] = await Promise.all([listFloors(projectId), db.findings.where('projectId').equals(projectId).toArray()]);
+  const rank = new Map(floors.map((f, i) => [f.id, i]));
+  return findings.sort((a, b) => (rank.get(a.floorId) ?? 1e9) - (rank.get(b.floorId) ?? 1e9) || referenceNumber(a.reference) - referenceNumber(b.reference) || a.reference.localeCompare(b.reference));
+}
+
+export type RenumberOrder = 'position' | 'captured';
+/** What renumbering would do, floor by floor (for the confirmation). */
+export async function renumberPlan(projectId: string, order: RenumberOrder): Promise<{ floor: Floor; code: string; findings: { finding: Finding; reference: string }[] }[]> {
+  const floors = await listFloors(projectId);
+  const codes = floorCodes(floors);
+  const all = await db.findings.where('projectId').equals(projectId).toArray();
+  return floors.map((floor) => {
+    const code = codes.get(floor.id)!;
+    const mine = all.filter((x) => x.floorId === floor.id);
+    if (order === 'position') {
+      // Reading order on the plan: rows top to bottom (a row is 1/20 of the plan's height), left to right in a row.
+      const row = (v: number) => Math.floor(v * 20);
+      mine.sort((a, b) => row(a.v) - row(b.v) || a.u - b.u || a.v - b.v);
+    } else {
+      mine.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || referenceNumber(a.reference) - referenceNumber(b.reference));
+    }
+    return { floor, code, findings: mine.map((finding, i) => ({ finding, reference: formatReference(i + 1, code) })) };
+  });
+}
+/**
+ * Renumber every finding per floor: G-001… on Ground, L1-001… on Level 1, in floor-list order. Each floor's next
+ * number continues after its last one. Returns how many references changed.
+ */
+export async function renumberFindings(projectId: string, order: RenumberOrder): Promise<number> {
+  return tracked(() => db.transaction('rw', [db.projects, db.floors, db.findings], async () => {
+    const plan = await renumberPlan(projectId, order);
+    const t = nowIso();
+    let changed = 0;
+    for (const { floor, code, findings } of plan) {
+      for (const { finding, reference } of findings) {
+        if (finding.reference !== reference) { await db.findings.update(finding.id, { reference, updatedAt: t }); changed++; }
+      }
+      await db.floors.update(floor.id, { nextFindingNumber: findings.length + 1, numberedAs: code, updatedAt: t });
+    }
+    await touch(projectId);
+    return changed;
+  }));
+}
 
 // ---------- categories ----------
 export const listCategories = (projectId: string) => db.categories.where('projectId').equals(projectId).sortBy('order');
@@ -311,6 +444,12 @@ export async function createCategory(projectId: string, name: string, colour = '
     await db.categories.add(cat);
     return cat;
   }));
+}
+const NEW_CATEGORY_COLOURS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4', '#42d4f4', '#f032e6', '#9a6324', '#469990', '#800000', '#808000', '#000075', '#bfa600', '#dc6e9b'];
+/** Add a category from a finding's dropdown: given a colour no other category of the project uses yet (if any left). */
+export async function quickAddCategory(projectId: string, name: string): Promise<Category> {
+  const used = new Set((await listCategories(projectId)).map((c) => c.colour.toLowerCase()));
+  return createCategory(projectId, name, NEW_CATEGORY_COLOURS.find((c) => !used.has(c)) ?? '#555555');
 }
 export async function updateCategory(id: string, patch: { name?: string; colour?: string }): Promise<void> {
   return tracked(() => db.transaction('rw', db.categories, async () => {
@@ -363,14 +502,17 @@ export async function addPhoto(findingId: string, img: ProcessedImage, caption =
     const f = await db.findings.get(findingId);
     if (!f) throw new RepoError('Finding not found');
     const t = nowIso();
-    const ids = { o: uuid(), d: uuid(), t: uuid() };
+    // A compact photo stores one image for both original and display (same blob id, stored once).
+    const shared = img.display === img.original;
+    const ids = { o: uuid(), d: '', t: uuid() };
+    ids.d = shared ? ids.o : uuid();
     const asset: Asset = {
       id: uuid(), projectId: f.projectId, kind: 'photo', filename: img.filename, mime: img.mime, width: img.width, height: img.height,
       originalBlobId: ids.o, displayBlobId: ids.d, thumbnailBlobId: ids.t, orientation: img.orientation, sizeBytes: img.original.size, createdAt: t,
     };
     await db.blobs.bulkAdd([
       { id: ids.o, projectId: f.projectId, data: img.original },
-      { id: ids.d, projectId: f.projectId, data: img.display },
+      ...(shared ? [] : [{ id: ids.d, projectId: f.projectId, data: img.display }]),
       { id: ids.t, projectId: f.projectId, data: img.thumbnail },
     ]);
     await db.assets.add(asset);
@@ -382,6 +524,31 @@ export async function addPhoto(findingId: string, img: ProcessedImage, caption =
     await db.photos.add(photo);
     await touch(f.projectId);
     return photo;
+  }));
+}
+/** Swap a saved photo's image (e.g. rotated); caption, order and cover stay. The old image is removed. */
+export async function replacePhotoImage(photoId: string, img: ProcessedImage): Promise<void> {
+  return tracked(() => db.transaction('rw', [db.photos, db.assets, db.blobs, db.floors, db.projects], async () => {
+    const p = await db.photos.get(photoId);
+    if (!p) throw new RepoError('Photo not found');
+    const old = await db.assets.get(p.assetId);
+    const t = nowIso();
+    const shared = img.display === img.original;
+    const ids = { o: uuid(), d: '', t: uuid() };
+    ids.d = shared ? ids.o : uuid();
+    const asset: Asset = {
+      id: uuid(), projectId: p.projectId, kind: 'photo', filename: old?.filename ?? img.filename, mime: img.mime, width: img.width, height: img.height,
+      originalBlobId: ids.o, displayBlobId: ids.d, thumbnailBlobId: ids.t, orientation: 1, sizeBytes: img.original.size, createdAt: t,
+    };
+    await db.blobs.bulkAdd([
+      { id: ids.o, projectId: p.projectId, data: img.original },
+      ...(shared ? [] : [{ id: ids.d, projectId: p.projectId, data: img.display }]),
+      { id: ids.t, projectId: p.projectId, data: img.thumbnail },
+    ]);
+    await db.assets.add(asset);
+    await db.photos.update(photoId, { assetId: asset.id });
+    await removeAsset(p.assetId);
+    await touch(p.projectId);
   }));
 }
 export const listPhotos = (findingId: string) => db.photos.where('findingId').equals(findingId).sortBy('order');

@@ -52,17 +52,73 @@ describe('projects and floors', () => {
     const after = await repo.listFloors(p.id);
     expect(after[0].id).toBe(b.id); expect(after[1].id).toBe(a.id);
   });
+  it('moves floors that share the same order number (e.g. after syncing two devices)', async () => {
+    const p = await repo.createProject();
+    const floors = await repo.listFloors(p.id);
+    await Promise.all(floors.slice(0, 2).map((f) => db.floors.update(f.id, { order: 0 })));
+    const before = await repo.listFloors(p.id);
+    await repo.moveFloor(before[0].id, 1);
+    const after = await repo.listFloors(p.id);
+    expect(after[1].id).toBe(before[0].id); expect(after[0].id).toBe(before[1].id);
+    expect(after.map((f) => f.order)).toEqual([0, 1, 2, 3, 4]);
+    await repo.moveFloor(before[0].id, 1); // and keeps going down
+    expect((await repo.listFloors(p.id))[2].id).toBe(before[0].id);
+  });
 });
 
 describe('findings', () => {
+  it('copies a finding to other floors with its details, position and photos; deleting the original keeps the copies’ photos', async () => {
+    const { floors, cats } = await seeded();
+    const src = await repo.createFinding({ floorId: floors[1].id, u: 0.31, v: 0.62, categoryId: cats[2].id, title: 'Wall finish', severity: 'minor', description: 'Not applied', locationNotes: 'Plant room' });
+    await repo.addPhoto(src.id, img('a.png'), 'first'); await repo.addPhoto(src.id, img('b.png'), 'second');
+    const copies = await repo.copyFindingToFloors(src.id, [floors[2].id, floors[3].id]);
+    expect(copies.map((c) => c.reference)).toEqual(['L2-001', 'L3-001']);
+    for (const c of copies) {
+      expect(c).toMatchObject({ u: 0.31, v: 0.62, categoryId: cats[2].id, title: 'Wall finish', severity: 'minor', description: 'Not applied', locationNotes: 'Plant room' });
+      const ph = await repo.listPhotos(c.id);
+      expect(ph.map((p) => [p.caption, p.isCover])).toEqual([['first', true], ['second', false]]);
+    }
+    await repo.deleteFinding(src.id);
+    const ph = await repo.listPhotos(copies[0].id);
+    const asset = await db.assets.get(ph[0].assetId);
+    expect(asset && (await db.blobs.get(asset.displayBlobId))).toBeTruthy(); // shared image kept for the copies
+  });
   it('allocates monotonic references and never renumbers', async () => {
     const { floors, cats } = await seeded();
     const mk = (t: string) => repo.createFinding({ floorId: floors[0].id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: t });
     const a = await mk('a'), b = await mk('b');
-    expect([a.reference, b.reference]).toEqual(['D-001', 'D-002']);
-    await repo.deleteFinding(a.id);
+    expect([a.reference, b.reference]).toEqual(['G-001', 'G-002']);
+    await repo.deleteFinding(b.id);
     const c = await mk('c');
-    expect(c.reference).toBe('D-003');
+    expect(c.reference).toBe('G-003'); // a deleted number is not reused
+    const l1 = await repo.createFinding({ floorId: floors[1].id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: 'up' });
+    expect(l1.reference).toBe('L1-001'); // each floor counts on its own
+  });
+  it('a floor code set by hand is used for new findings, and two floors never share a prefix', async () => {
+    const { p, floors, cats } = await seeded();
+    await repo.updateFloor(floors[4].id, { code: 'Roof' });
+    const f = await repo.createFinding({ floorId: floors[4].id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: 'r' });
+    expect(f.reference).toBe('Roof-001');
+    await repo.updateFloor(floors[3].id, { name: 'Level 1' }); // a second "Level 1"
+    const codes = repo.floorCodes(await repo.listFloors(p.id));
+    expect(codes.get(floors[1].id)).toBe('L1'); expect(codes.get(floors[3].id)).toBe('L1B');
+  });
+  it('renumbers per floor in floor order, by position on the plan or by capture order', async () => {
+    const { p, floors, cats } = await seeded();
+    const mk = (fl: number, u: number, v: number, title: string) => repo.createFinding({ floorId: floors[fl].id, u, v, categoryId: cats[0].id, title });
+    // Old-style numbers, captured out of order across floors.
+    const x = await mk(1, 0.9, 0.9, 'L1 bottom right'); const y = await mk(0, 0.8, 0.1, 'G top right');
+    const z = await mk(1, 0.1, 0.1, 'L1 top left'); const w = await mk(0, 0.1, 0.12, 'G top left');
+    let i = 0;
+    for (const f of [x, y, z, w]) await db.findings.update(f.id, { reference: `D-${String(++i).padStart(3, '0')}` });
+    await repo.moveFloor(floors[1].id, -1); // Level 1 now first in the list
+    expect(await repo.renumberFindings(p.id, 'position')).toBe(4);
+    const ref = async (id: string) => (await db.findings.get(id))!.reference;
+    expect([await ref(z.id), await ref(x.id), await ref(w.id), await ref(y.id)]).toEqual(['L1-001', 'L1-002', 'G-001', 'G-002']);
+    expect((await repo.listFindings(p.id)).map((f) => f.reference)).toEqual(['L1-001', 'L1-002', 'G-001', 'G-002']);
+    expect((await mk(0, 0.5, 0.5, 'next')).reference).toBe('G-003');
+    await repo.renumberFindings(p.id, 'captured');
+    expect([await ref(x.id), await ref(z.id), await ref(y.id), await ref(w.id)]).toEqual(['L1-001', 'L1-002', 'G-001', 'G-002']);
   });
   it('validates title, category and coordinates', async () => {
     const { floors, cats } = await seeded();
