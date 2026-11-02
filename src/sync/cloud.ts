@@ -6,6 +6,7 @@ import { SUPABASE_KEY, SUPABASE_URL, cloudConfigured } from './config';
 import { SyncEngine, type SyncStatus } from './engine';
 import { migrateLegacyBlobs, supabaseRemote } from './supabaseRemote';
 import * as mfa from './mfa';
+import { adoptSyncState } from './account';
 import * as repo from '../data/repo';
 
 /** What the UI shows about cloud sync. */
@@ -97,6 +98,8 @@ async function startEngine(session: Session | null) {
     set(step.step === 'code' ? { kind: 'mfa', email, factorId: step.factorId } : { kind: 'mfaSetup', email });
     return;
   }
+  await adoptSyncState(db, session.user.id); // same account as last time: resume; a different account starts clean
+  if (engineUser !== uid) return;
   sharingAvailable = await detectSharing(client).catch(() => false);
   if (engineUser !== uid) return; // signed out meanwhile
   engine = new SyncEngine(db, supabaseRemote(client, session.user.id, sharingAvailable), deviceId(), (s) => set({ ...s, email }), () => navigator.onLine, 1200, mode === 'auto');
@@ -234,7 +237,7 @@ export async function signUp(email: string, password: string): Promise<boolean> 
 /** Stops syncing on this device. Projects stay on the device; signing in again re-links them. */
 export async function signOut(): Promise<void> {
   engine?.stop(); engine = undefined; engineUser = undefined; myUser = undefined; setRoles(new Map());
-  await db.transaction('rw', db.sync, db.meta, async () => { await db.sync.clear(); await db.meta.clear(); });
+  // The record of what is already uploaded stays, so signing back in as the same account does not resend every photo.
   await client?.auth.signOut();
   set({ kind: 'signedOut' });
 }
