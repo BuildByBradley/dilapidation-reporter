@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Dialog } from './ui';
 import {
-  cancelRecovery, sendPasswordReset, setSyncMode, signIn, signOut, signUp, syncNow, updatePassword,
+  cancelRecovery, finishTwoFactorSetup, sendPasswordReset, setSyncMode, signIn, signOut, signUp, startTwoFactorSetup, submitMfaCode, syncNow,
+  turnOffTwoFactor, twoFactorDevices, updatePassword,
   useCloudState, useRecovering, useSyncMode, type CloudState,
 } from '../sync/cloud';
 
@@ -15,6 +16,7 @@ function describe(s: CloudState): { text: string; tone: 'ok' | 'busy' | 'warn' |
   switch (s.kind) {
     case 'unavailable': return { text: 'This device only', tone: 'off' };
     case 'signedOut': return { text: 'Not syncing', tone: 'off', detail: 'Sign in on the projects page to sync between your phone and computer.' };
+    case 'mfa': return { text: 'Enter your code', tone: 'warn', detail: 'Open the projects page and enter the 6-digit code from your authenticator app to finish signing in.' };
     case 'syncing': return { text: s.pending ? `Syncing ${s.pending}…` : 'Syncing…', tone: 'busy' };
     case 'synced': return { text: s.live ? 'Synced · live' : 'Synced', tone: 'ok', detail: `Signed in as ${s.email}. Last synced ${new Date(s.at).toLocaleTimeString()}.` };
     case 'offline': return { text: `Offline · ${s.pending} waiting`, tone: 'warn', detail: 'Changes are safe on this device and upload when you are back online.' };
@@ -34,7 +36,7 @@ export function CloudStatus() {
   return (
     <>
       <button type="button" className={`cloud-status ${d.tone}${s.kind === 'manual' ? ' manual' : ''}`} data-testid="cloud-status" title={d.detail ?? d.text}
-        disabled={s.kind === 'syncing'} onClick={() => (s.kind === 'signedOut' ? (window.location.hash = '/') : s.kind === 'error' ? setDetails(true) : syncNow())}>
+        disabled={s.kind === 'syncing'} onClick={() => (s.kind === 'signedOut' || s.kind === 'mfa' ? (window.location.hash = '/') : s.kind === 'error' ? setDetails(true) : syncNow())}>
         <span className="dot" aria-hidden="true" />{s.kind === 'manual' && <span aria-hidden="true">⟳ </span>}{d.text}
       </button>
       {details && <SyncProblemDialog onClose={() => setDetails(false)} />}
@@ -115,6 +117,7 @@ export function CloudPanel() {
   const [msg, setMsg] = useState<{ tone: 'error' | 'ok'; text: string } | null>(null);
   const [changing, setChanging] = useState(false);
   const [newPw, setNewPw] = useState('');
+  const [code, setCode] = useState('');
   if (s.kind === 'unavailable') return null;
 
   const run = async (fn: () => Promise<string | void>) => {
@@ -122,6 +125,22 @@ export function CloudPanel() {
     try { const ok = await fn(); if (ok) setMsg({ tone: 'ok', text: ok }); } catch (e) { setMsg({ tone: 'error', text: e instanceof Error ? e.message : String(e) }); } finally { setBusy(false); }
   };
 
+  if (s.kind === 'mfa') {
+    return (
+      <section className="panel cloud-panel" aria-label="Two-factor sign-in">
+        <h2>Enter your code</h2>
+        <p className="small muted">Signing in as <strong>{s.email}</strong>. Open your authenticator app and type the 6-digit code for Dilapidation Inspector.</p>
+        <form className="cloud-form" onSubmit={(e) => { e.preventDefault(); void run(async () => { await submitMfaCode(code); setCode(''); }); }}>
+          <label>6-digit code<input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]*" maxLength={7} value={code} onChange={(e) => setCode(e.target.value)} autoFocus required data-testid="mfa-code" /></label>
+          <div className="row">
+            <button className="primary" type="submit" disabled={busy || code.replace(/\s/g, '').length < 6}>Verify</button>
+            <button type="button" disabled={busy} onClick={() => run(async () => { await signOut(); })}>Cancel</button>
+          </div>
+        </form>
+        {msg && <p className={msg.tone === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
+      </section>
+    );
+  }
   if (s.kind !== 'signedOut') {
     const d = describe(s);
     return (
@@ -141,6 +160,7 @@ export function CloudPanel() {
             <button type="button" onClick={() => { setChanging(false); setNewPw(''); }}>Cancel</button>
           </form>
         ) : <button className="link" onClick={() => setChanging(true)}>Change password</button>}
+        <TwoFactor />
         {msg && <p className={msg.tone === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
       </section>
     );
@@ -166,5 +186,47 @@ export function CloudPanel() {
       </form>
       {msg && <p className={msg.tone === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
     </section>
+  );
+}
+
+/** Account panel block: turn authenticator-app codes on or off. */
+function TwoFactor() {
+  const [devices, setDevices] = useState<{ id: string; name: string }[] | null>(null);
+  const [setup, setSetup] = useState<{ factorId: string; qrSvg: string; secret: string } | null>(null);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ tone: 'error' | 'ok'; text: string } | null>(null);
+  const refresh = () => twoFactorDevices().then(setDevices).catch(() => setDevices([]));
+  useEffect(() => { void refresh(); }, []);
+  const run = async (fn: () => Promise<string | void>) => {
+    setBusy(true); setMsg(null);
+    try { const ok = await fn(); if (ok) setMsg({ tone: 'ok', text: ok }); } catch (e) { setMsg({ tone: 'error', text: e instanceof Error ? e.message : String(e) }); } finally { setBusy(false); }
+  };
+  if (!devices) return null;
+  return (
+    <div className="two-factor" data-testid="two-factor">
+      <strong>Two-factor sign-in</strong>{' '}
+      {devices.length > 0 && !setup && <>
+        <span className="ok">On</span> <span className="small muted">({devices[0].name})</span>{' '}
+        <button className="link" disabled={busy} onClick={() => { if (window.confirm('Turn off two-factor sign-in for your account?')) void run(async () => { await turnOffTwoFactor(devices[0].id); await refresh(); return 'Two-factor sign-in is off.'; }); }}>Turn off</button>
+      </>}
+      {devices.length === 0 && !setup && <>
+        <span className="small muted">Off. Adds a 6-digit code from an authenticator app to your password.</span>{' '}
+        <button className="link" disabled={busy} onClick={() => run(async () => { setSetup(await startTwoFactorSetup()); })}>Turn on</button>
+      </>}
+      {setup && (
+        <form className="cloud-form" onSubmit={(e) => { e.preventDefault(); void run(async () => { await finishTwoFactorSetup(setup.factorId, code); setSetup(null); setCode(''); await refresh(); return 'Two-factor sign-in is on. You will be asked for a code each time you sign in.'; }); }}>
+          <p className="small">1. In an authenticator app (for example Microsoft Authenticator), add an account and scan this code.</p>
+          <img src={setup.qrSvg} alt="QR code for your authenticator app" width={180} height={180} />
+          <p className="small muted">Cannot scan? Type this key into the app: <code>{setup.secret}</code></p>
+          <label>2. Type the 6-digit code the app shows<input inputMode="numeric" autoComplete="one-time-code" maxLength={7} value={code} onChange={(e) => setCode(e.target.value)} required /></label>
+          <div className="row">
+            <button className="primary" type="submit" disabled={busy || code.replace(/\s/g, '').length < 6}>Turn on</button>
+            <button type="button" disabled={busy} onClick={() => { setSetup(null); setCode(''); }}>Cancel</button>
+          </div>
+        </form>
+      )}
+      {msg && <p className={msg.tone === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
+    </div>
   );
 }

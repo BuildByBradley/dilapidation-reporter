@@ -12,7 +12,7 @@ cloud database, so the site team and the office see the same project. Projects c
 
 **Status.** A working, automatically tested prototype with a real backend and row-level access rules. It runs on personal
 accounts and has had no independent review, so it is ready for a **controlled pilot**, not yet for company-wide use. Section 8
-lists what closes that gap, including two-factor authentication.
+lists what closes that gap; two-factor authentication is now built but not yet switched on.
 
 It records observations only. It does not certify building safety, diagnose causes or measure anything; pin positions are
 positions on the supplied drawing.
@@ -106,7 +106,7 @@ All code was written by the AI tool. The history contains no human code review a
 |---|---|
 | TypeScript type check | clean |
 | Lint | clean |
-| Unit tests (Vitest) | 74 passed, 2 skipped (the skipped ones need a live Supabase connection) |
+| Unit tests (Vitest) | 80 passed, 2 skipped (the skipped ones need a live Supabase connection) |
 | Browser tests (Playwright, Chromium) | 60 of 60 passed (about 3 minutes, headless Chromium on Linux) |
 | `npm audit` (production) | 1 high advisory in `zod` (memory exhaustion on huge collections). zod is only used to validate backup files a user imports; fix is an upgrade to zod 4.x (breaking change, not yet done) |
 
@@ -137,7 +137,7 @@ project on the owner's account**, which is why gaps 1, 2 and 5 below are the pri
 | 1 | Code and site are on the owner's personal GitHub account; repository and site are **public** | Move to a private repository in a company organisation; host on company infrastructure |
 | 2 | Backend is a Supabase project on the owner's account; plan, region and admin access undocumented **[confirm]** | Company-owned project in an approved region; documented admins; POPIA / data-residency decision |
 | 3 | Sign-up appears open to anyone with the URL; e-mail confirmation unknown **[confirm]**; 6-character minimum password | Restrict sign-up to company e-mail domain or SSO; stronger password policy |
-| 4 | **No two-factor authentication** (raised by IT) | Add authenticator-app 2FA; see section 8 |
+| 4 | Two-factor authentication (raised by IT): built, **not yet enabled or tested live**; GitHub, Supabase and Anthropic accounts also need it | Enable per section 8; turn on for the owner accounts now |
 | 5 | Client data (addresses, names, property photos) in the cloud with no app-level encryption; platform admins can read it | Classify the data; confirm encryption at rest and admin-access policy |
 | 6 | No audit trail of who changed what | Add change history before records are relied on as evidence |
 | 7 | AI help box uses a third-party API and has no per-user rate limit in the code | Approve or remove; add rate limit and a spend cap on the key |
@@ -149,17 +149,18 @@ project on the owner's account**, which is why gaps 1, 2 and 5 below are the pri
 | 13 | No error monitoring or logging visible to IT | Log to a company-approved service |
 | 14 | Storage meter measures the device, not the cloud quota | Add cloud usage once the company plan is chosen |
 
-## 8. Two-factor authentication: proposed approach
+## 8. Two-factor authentication
 
-Supabase Auth supports time-based one-time codes (authenticator apps such as Microsoft Authenticator) **[confirm availability on the chosen plan]**.
+**Built, not yet switched on in production.** Requested by IT; implemented on 2 Nov 2026 with Supabase Auth's authenticator-app (TOTP) support.
 
-1. Enable MFA in the Supabase Auth settings.
-2. Add to the app: a "Turn on two-factor" step that shows a QR code, then asks for the 6-digit code; and a code prompt at sign-in.
-3. Enforce on the server, not only in the screen: database rules that require an MFA-verified session (`aal2`) before records or files can be read or written, so a stolen password alone gets nothing.
-4. Recovery: a documented process for a lost phone (admin removes the factor), and an option to enrol a second device.
-5. Tests: unit tests for the rule, browser tests for enrol and sign-in with a test authenticator, and a manual run on real phones.
+* **In the app:** signed-in users get "Two-factor sign-in → Turn on" in the sync box. They scan a QR code with an authenticator app (for example Microsoft Authenticator), enter the 6-digit code, and it is on. At every later sign-in the app asks for the password and then the code, and nothing syncs until the code is accepted. Users can turn it off from the same place (Supabase only allows that from a session that has already passed a code).
+* **On the server (`supabase/mfa.sql`):** database and file-storage rules that refuse a session that has not passed the code for any account that has enrolled. A stolen password alone then gets nothing. By default accounts that have not enrolled keep working, so nobody is locked out when it is run; one commented line changes it to require two-factor for everyone once all users have enrolled.
+* **Tests:** 6 unit tests cover the sign-in logic (no code needed, code needed, code already given, wrong code message, set-up, removal). The existing 60 browser tests still pass. **It has not been tested against the live Supabase project or on real phones**, because that needs the settings below.
+* **To switch on:** (1) enable TOTP MFA in the Supabase Auth settings; (2) run `supabase/mfa.sql`; (3) each user turns it on in the app; (4) once everyone has, change the rule to require it for all.
+* **Recovery:** if a user loses their phone, an administrator removes the authenticator from the account in the Supabase dashboard; no recovery codes are provided yet.
+* **Not covered:** the AI help function does not itself check for the code. It sits behind sign-in and returns only help text, but it should be tightened if IT requires it. Longer term, single sign-on through the company identity provider would replace password plus code.
 
-Not built yet. Longer term, single sign-on through the company identity provider would replace password plus 2FA.
+Separately, the **GitHub account** that holds the code and publishes the site needs two-factor too, as IT's link describes. That is an account setting (not part of the app) and must be done by the account owner; the same applies to the Supabase and Anthropic accounts.
 
 ## 9. What is needed before company-wide release
 
@@ -174,7 +175,7 @@ Not built yet. Longer term, single sign-on through the company identity provider
 1. Approved hosting and domain; must sign-in use company SSO?
 2. Approved backend platform, region and administrator; classification of client addresses and photos.
 3. Allow or block the AI help assistant and its provider.
-4. Two-factor: authenticator app now, SSO later?
+4. Two-factor: built (authenticator app); agree rollout (enforce for all users when?) and whether SSO follows
 5. Required controls before go-live (review, penetration test, backup policy, logging, device management).
 6. Pilot scope: how many users and projects, for how long.
 

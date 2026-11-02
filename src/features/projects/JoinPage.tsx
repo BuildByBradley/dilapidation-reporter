@@ -8,7 +8,7 @@ import { acceptInvite, rememberInvite, useCloudState } from '../../sync/cloud';
 /** Opened from an invite link (#/join/<token>): sign in if needed, join, then open the project once it has arrived. */
 export function JoinPage({ token }: { token: string }) {
   const cloud = useCloudState();
-  const signedIn = cloud.kind !== 'signedOut' && cloud.kind !== 'unavailable';
+  const signedIn = cloud.kind !== 'signedOut' && cloud.kind !== 'unavailable' && cloud.kind !== 'mfa';
   const [joined, setJoined] = useState<{ projectId: string; role: string; projectName: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { rememberInvite(token); }, [token]);

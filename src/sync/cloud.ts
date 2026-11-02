@@ -5,12 +5,14 @@ import { uuid } from '../lib/ids';
 import { SUPABASE_KEY, SUPABASE_URL, cloudConfigured } from './config';
 import { SyncEngine, type SyncStatus } from './engine';
 import { migrateLegacyBlobs, supabaseRemote } from './supabaseRemote';
+import * as mfa from './mfa';
 import * as repo from '../data/repo';
 
 /** What the UI shows about cloud sync. */
 export type CloudState =
   | { kind: 'unavailable' }
   | { kind: 'signedOut' }
+  | { kind: 'mfa'; email: string; factorId: string } // password accepted; waiting for the authenticator code
   | ({ email: string } & SyncStatus);
 
 let state: CloudState = cloudConfigured ? { kind: 'signedOut' } : { kind: 'unavailable' };
@@ -86,6 +88,10 @@ async function startEngine(session: Session | null) {
   engine?.stop(); engine = undefined; engineUser = uid; myUser = uid;
   if (!session || !client) { sharingAvailable = false; setRoles(new Map()); set({ kind: 'signedOut' }); return; }
   const email = session.user.email ?? 'signed in';
+  // An account with two-factor on must enter its code before anything syncs.
+  const factorId = await mfa.pendingFactor(client).catch(() => null);
+  if (engineUser !== uid) return;
+  if (factorId) { engineUser = undefined; myUser = undefined; sharingAvailable = false; setRoles(new Map()); set({ kind: 'mfa', email, factorId }); return; }
   sharingAvailable = await detectSharing(client).catch(() => false);
   if (engineUser !== uid) return; // signed out meanwhile
   engine = new SyncEngine(db, supabaseRemote(client, session.user.id, sharingAvailable), deviceId(), (s) => set({ ...s, email }), () => navigator.onLine, 1200, mode === 'auto');
@@ -190,6 +196,21 @@ export async function signIn(email: string, password: string): Promise<void> {
   const { error } = await client.auth.signInWithPassword({ email: email.trim(), password });
   if (error) throw new Error(/invalid login/i.test(error.message) ? 'Wrong email or password.' : /not confirmed/i.test(error.message) ? 'Confirm your email first (check your inbox), then sign in.' : error.message);
 }
+
+/** Second step of sign-in for accounts with two-factor on. */
+export async function submitMfaCode(code: string): Promise<void> {
+  if (!client) throw new Error('Cloud sync is not available in this build.');
+  const s = state;
+  if (s.kind !== 'mfa') throw new Error('No code is needed right now.');
+  await mfa.verifySignIn(client, s.factorId, code);
+  const { data } = await client.auth.getSession();
+  await startEngine(data.session);
+}
+
+export const startTwoFactorSetup = () => { if (!client) throw new Error('Cloud sync is not available in this build.'); return mfa.startEnrolment(client, 'Authenticator'); };
+export const finishTwoFactorSetup = (factorId: string, code: string) => { if (!client) throw new Error('Cloud sync is not available in this build.'); return mfa.confirmEnrolment(client, factorId, code); };
+export const twoFactorDevices = () => { if (!client) throw new Error('Cloud sync is not available in this build.'); return mfa.listAuthenticators(client); };
+export const turnOffTwoFactor = (factorId: string) => { if (!client) throw new Error('Cloud sync is not available in this build.'); return mfa.removeAuthenticator(client, factorId); };
 
 /** Returns true when the account still needs its email confirmed before signing in. */
 export async function signUp(email: string, password: string): Promise<boolean> {

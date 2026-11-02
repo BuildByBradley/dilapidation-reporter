@@ -137,7 +137,7 @@ export function HelpButton() {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('ask');
   const cloud = useCloudState();
-  const signedIn = cloud.kind !== 'signedOut' && cloud.kind !== 'unavailable';
+  const signedIn = cloud.kind !== 'signedOut' && cloud.kind !== 'unavailable' && cloud.kind !== 'mfa';
   return (
     <>
       <button className="help-btn" aria-label="Help" title="Help, guide and suggestions" onClick={() => setOpen(true)}>?</button>
