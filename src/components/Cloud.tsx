@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Dialog } from './ui';
 import {
   cancelRecovery, finishTwoFactorSetup, sendPasswordReset, setSyncMode, signIn, signOut, signUp, startTwoFactorSetup, submitMfaCode, syncNow,
-  turnOffTwoFactor, twoFactorDevices, updatePassword,
+  twoFactorDevices, updatePassword, completeMfaSetup,
   useCloudState, useRecovering, useSyncMode, type CloudState,
 } from '../sync/cloud';
 
@@ -17,6 +17,7 @@ function describe(s: CloudState): { text: string; tone: 'ok' | 'busy' | 'warn' |
     case 'unavailable': return { text: 'This device only', tone: 'off' };
     case 'signedOut': return { text: 'Not syncing', tone: 'off', detail: 'Sign in on the projects page to sync between your phone and computer.' };
     case 'mfa': return { text: 'Enter your code', tone: 'warn', detail: 'Open the projects page and enter the 6-digit code from your authenticator app to finish signing in.' };
+    case 'mfaSetup': return { text: 'Set up two-factor', tone: 'warn', detail: 'Two-factor sign-in is required. Open the projects page to set it up.' };
     case 'syncing': return { text: s.pending ? `Syncing ${s.pending}…` : 'Syncing…', tone: 'busy' };
     case 'synced': return { text: s.live ? 'Synced · live' : 'Synced', tone: 'ok', detail: `Signed in as ${s.email}. Last synced ${new Date(s.at).toLocaleTimeString()}.` };
     case 'offline': return { text: `Offline · ${s.pending} waiting`, tone: 'warn', detail: 'Changes are safe on this device and upload when you are back online.' };
@@ -36,7 +37,7 @@ export function CloudStatus() {
   return (
     <>
       <button type="button" className={`cloud-status ${d.tone}${s.kind === 'manual' ? ' manual' : ''}`} data-testid="cloud-status" title={d.detail ?? d.text}
-        disabled={s.kind === 'syncing'} onClick={() => (s.kind === 'signedOut' || s.kind === 'mfa' ? (window.location.hash = '/') : s.kind === 'error' ? setDetails(true) : syncNow())}>
+        disabled={s.kind === 'syncing'} onClick={() => (s.kind === 'signedOut' || s.kind === 'mfa' || s.kind === 'mfaSetup' ? (window.location.hash = '/') : s.kind === 'error' ? setDetails(true) : syncNow())}>
         <span className="dot" aria-hidden="true" />{s.kind === 'manual' && <span aria-hidden="true">⟳ </span>}{d.text}
       </button>
       {details && <SyncProblemDialog onClose={() => setDetails(false)} />}
@@ -125,6 +126,15 @@ export function CloudPanel() {
     try { const ok = await fn(); if (ok) setMsg({ tone: 'ok', text: ok }); } catch (e) { setMsg({ tone: 'error', text: e instanceof Error ? e.message : String(e) }); } finally { setBusy(false); }
   };
 
+  if (s.kind === 'mfaSetup') {
+    return (
+      <section className="panel cloud-panel" aria-label="Set up two-factor sign-in">
+        <h2>Set up two-factor sign-in</h2>
+        <p className="small muted">Signing in as <strong>{s.email}</strong>. Two-factor sign-in is required for everyone. It takes about a minute, and you only do it once.</p>
+        <TwoFactorSetup onDone={() => completeMfaSetup()} onCancel={() => { void signOut(); }} />
+      </section>
+    );
+  }
   if (s.kind === 'mfa') {
     return (
       <section className="panel cloud-panel" aria-label="Two-factor sign-in">
@@ -189,44 +199,43 @@ export function CloudPanel() {
   );
 }
 
-/** Account panel block: turn authenticator-app codes on or off. */
-function TwoFactor() {
-  const [devices, setDevices] = useState<{ id: string; name: string }[] | null>(null);
+/** Compulsory set-up: scan the QR code, then confirm with the first 6-digit code. */
+function TwoFactorSetup({ onDone, onCancel }: { onDone: () => Promise<void>; onCancel: () => void }) {
   const [setup, setSetup] = useState<{ factorId: string; qrSvg: string; secret: string } | null>(null);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ tone: 'error' | 'ok'; text: string } | null>(null);
-  const refresh = () => twoFactorDevices().then(setDevices).catch(() => setDevices([]));
-  useEffect(() => { void refresh(); }, []);
-  const run = async (fn: () => Promise<string | void>) => {
+  const [msg, setMsg] = useState<string | null>(null);
+  const begin = async () => { setBusy(true); setMsg(null); try { setSetup(await startTwoFactorSetup()); } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); } };
+  const started = useRef(false);
+  useEffect(() => { if (started.current) return; started.current = true; void begin(); }, []);
+  const confirm = async () => {
+    if (!setup) return;
     setBusy(true); setMsg(null);
-    try { const ok = await fn(); if (ok) setMsg({ tone: 'ok', text: ok }); } catch (e) { setMsg({ tone: 'error', text: e instanceof Error ? e.message : String(e) }); } finally { setBusy(false); }
+    try { await finishTwoFactorSetup(setup.factorId, code); await onDone(); } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
-  if (!devices) return null;
   return (
-    <div className="two-factor" data-testid="two-factor">
-      <strong>Two-factor sign-in</strong>{' '}
-      {devices.length > 0 && !setup && <>
-        <span className="ok">On</span> <span className="small muted">({devices[0].name})</span>{' '}
-        <button className="link" disabled={busy} onClick={() => { if (window.confirm('Turn off two-factor sign-in for your account?')) void run(async () => { await turnOffTwoFactor(devices[0].id); await refresh(); return 'Two-factor sign-in is off.'; }); }}>Turn off</button>
+    <form className="cloud-form" data-testid="mfa-setup" onSubmit={(e) => { e.preventDefault(); void confirm(); }}>
+      {!setup && !msg && <p role="status">Preparing…</p>}
+      {setup && <>
+        <p className="small">1. Install an authenticator app on your phone (for example Microsoft Authenticator), add an account and scan this code.</p>
+        <img src={setup.qrSvg} alt="QR code for your authenticator app" width={180} height={180} />
+        <p className="small muted">Cannot scan? Type this key into the app: <code>{setup.secret}</code></p>
+        <label>2. Type the 6-digit code the app shows<input inputMode="numeric" autoComplete="one-time-code" maxLength={7} value={code} onChange={(e) => setCode(e.target.value)} required data-testid="mfa-setup-code" /></label>
       </>}
-      {devices.length === 0 && !setup && <>
-        <span className="small muted">Off. Adds a 6-digit code from an authenticator app to your password.</span>{' '}
-        <button className="link" disabled={busy} onClick={() => run(async () => { setSetup(await startTwoFactorSetup()); })}>Turn on</button>
-      </>}
-      {setup && (
-        <form className="cloud-form" onSubmit={(e) => { e.preventDefault(); void run(async () => { await finishTwoFactorSetup(setup.factorId, code); setSetup(null); setCode(''); await refresh(); return 'Two-factor sign-in is on. You will be asked for a code each time you sign in.'; }); }}>
-          <p className="small">1. In an authenticator app (for example Microsoft Authenticator), add an account and scan this code.</p>
-          <img src={setup.qrSvg} alt="QR code for your authenticator app" width={180} height={180} />
-          <p className="small muted">Cannot scan? Type this key into the app: <code>{setup.secret}</code></p>
-          <label>2. Type the 6-digit code the app shows<input inputMode="numeric" autoComplete="one-time-code" maxLength={7} value={code} onChange={(e) => setCode(e.target.value)} required /></label>
-          <div className="row">
-            <button className="primary" type="submit" disabled={busy || code.replace(/\s/g, '').length < 6}>Turn on</button>
-            <button type="button" disabled={busy} onClick={() => { setSetup(null); setCode(''); }}>Cancel</button>
-          </div>
-        </form>
-      )}
-      {msg && <p className={msg.tone === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
-    </div>
+      <div className="row">
+        <button className="primary" type="submit" disabled={busy || !setup || code.replace(/\s/g, '').length < 6}>Finish set-up</button>
+        {!setup && msg && <button type="button" disabled={busy} onClick={() => void begin()}>Try again</button>}
+        <button type="button" disabled={busy} onClick={onCancel}>Sign out</button>
+      </div>
+      {msg && <p className="error" role="status">{msg}</p>}
+    </form>
   );
+}
+
+/** Account panel line: two-factor is compulsory, so this only shows its state. */
+function TwoFactor() {
+  const [devices, setDevices] = useState<{ id: string; name: string }[] | null>(null);
+  useEffect(() => { void twoFactorDevices().then(setDevices).catch(() => setDevices([])); }, []);
+  if (!devices?.length) return null;
+  return <p className="two-factor small" data-testid="two-factor"><strong>Two-factor sign-in:</strong> <span className="ok">On</span> <span className="muted">({devices[0].name}). It is required and cannot be turned off.</span></p>;
 }

@@ -70,7 +70,7 @@ Dilapidation Inspector records building-condition ("dilapidation") inspections o
 - The status button in the top bar shows Synced · live, Syncing…, Offline · N waiting, or Sync problem (hover or tap for the reason).
 - Everything is saved on the device first, so the app works without signal; changes upload when you sync or come back online.
 - Forgot password? on the sign-in box emails a reset link; opening it asks for a new password. Signed in, "Change password" is in the sync box.
-- Two-factor sign-in: signed in, the sync box has "Two-factor sign-in → Turn on". Scan the QR code with an authenticator app (for example Microsoft Authenticator), type the 6-digit code it shows, and it is on. From then on, signing in asks for the password and then a 6-digit code. "Turn off" is in the same place. If you lose the phone with the authenticator, ask the app administrator to remove it from your account.
+- Two-factor sign-in is required for everyone. The first time you sign in, the app shows a QR code: install an authenticator app (for example Microsoft Authenticator), scan the code, and type the 6-digit code it shows. From then on, signing in asks for your password and then a 6-digit code. It cannot be turned off. If you lose the phone with the authenticator, ask the app administrator to remove it from your account, then set it up again.
 - Sign out stops syncing on that device; its projects stay on it.
 
 ## Sharing a project with other people

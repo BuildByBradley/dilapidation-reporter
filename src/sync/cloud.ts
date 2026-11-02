@@ -13,6 +13,7 @@ export type CloudState =
   | { kind: 'unavailable' }
   | { kind: 'signedOut' }
   | { kind: 'mfa'; email: string; factorId: string } // password accepted; waiting for the authenticator code
+  | { kind: 'mfaSetup'; email: string } // password accepted; two-factor is compulsory and not set up yet
   | ({ email: string } & SyncStatus);
 
 let state: CloudState = cloudConfigured ? { kind: 'signedOut' } : { kind: 'unavailable' };
@@ -88,10 +89,14 @@ async function startEngine(session: Session | null) {
   engine?.stop(); engine = undefined; engineUser = uid; myUser = uid;
   if (!session || !client) { sharingAvailable = false; setRoles(new Map()); set({ kind: 'signedOut' }); return; }
   const email = session.user.email ?? 'signed in';
-  // An account with two-factor on must enter its code before anything syncs.
-  const factorId = await mfa.pendingFactor(client).catch(() => null);
+  // Two-factor is compulsory: nothing syncs until this session has passed its code (or the account has set one up).
+  const step = await mfa.mfaStep(client).catch(() => null); // if the check itself cannot run (offline), the server rules still protect the data
   if (engineUser !== uid) return;
-  if (factorId) { engineUser = undefined; myUser = undefined; sharingAvailable = false; setRoles(new Map()); set({ kind: 'mfa', email, factorId }); return; }
+  if (step) {
+    engineUser = undefined; myUser = undefined; sharingAvailable = false; setRoles(new Map());
+    set(step.step === 'code' ? { kind: 'mfa', email, factorId: step.factorId } : { kind: 'mfaSetup', email });
+    return;
+  }
   sharingAvailable = await detectSharing(client).catch(() => false);
   if (engineUser !== uid) return; // signed out meanwhile
   engine = new SyncEngine(db, supabaseRemote(client, session.user.id, sharingAvailable), deviceId(), (s) => set({ ...s, email }), () => navigator.onLine, 1200, mode === 'auto');
@@ -207,10 +212,16 @@ export async function submitMfaCode(code: string): Promise<void> {
   await startEngine(data.session);
 }
 
+/** Called after the compulsory set-up is confirmed: the session is now verified, so sync can start. */
+export async function completeMfaSetup(): Promise<void> {
+  if (!client) throw new Error('Cloud sync is not available in this build.');
+  const { data } = await client.auth.getSession();
+  await startEngine(data.session);
+}
+
 export const startTwoFactorSetup = () => { if (!client) throw new Error('Cloud sync is not available in this build.'); return mfa.startEnrolment(client, 'Authenticator'); };
 export const finishTwoFactorSetup = (factorId: string, code: string) => { if (!client) throw new Error('Cloud sync is not available in this build.'); return mfa.confirmEnrolment(client, factorId, code); };
 export const twoFactorDevices = () => { if (!client) throw new Error('Cloud sync is not available in this build.'); return mfa.listAuthenticators(client); };
-export const turnOffTwoFactor = (factorId: string) => { if (!client) throw new Error('Cloud sync is not available in this build.'); return mfa.removeAuthenticator(client, factorId); };
 
 /** Returns true when the account still needs its email confirmed before signing in. */
 export async function signUp(email: string, password: string): Promise<boolean> {
