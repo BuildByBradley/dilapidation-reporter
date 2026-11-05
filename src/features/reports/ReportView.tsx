@@ -10,23 +10,38 @@ import type { Asset, Project } from '../../lib/types';
 import { reportTitleOf } from '../../lib/types';
 import { SaveIndicator } from '../../components/SaveIndicator';
 import paragonLogo from '../../assets/paragon-logo.png';
+import { isPracticeEmail, useProfile } from '../../sync/cloud';
 
 type Status = { loaded: number; total: number; failed: string[] };
 
-/** Logo artwork (assets/paragon-logo.png) is 545 × 167 px, trimmed to the ink: PARAGON's top is the first row, ARCHITECTS' bottom the last. */
-const LOGO_RATIO = 545 / 167;
+/** Widest a logo may be on the cover; a wider one is scaled down and centred in the band. */
+const LOGO_MAX_W_MM = 75;
 /**
- * Report title and project name with the practice logo on the right, sized to sit exactly between them: the top of
- * PARAGON lines up with the top of the title's capitals, the bottom of ARCHITECTS with the baseline of the project
- * name. The cover font is the device's own, so both lines are measured from the rendered text rather than fixed.
+ * Which logo goes on the cover: the project's own logo if one was added under Project details; otherwise the
+ * Paragon Architects logo, but only for someone signed in with a paragon.co.za address; otherwise none.
  */
-function CoverHeading({ title, name }: { title: string; name: string }) {
+export function coverLogo(project: Pick<Project, 'logo'>, email: string | null | undefined): { src: string; alt: string } | null {
+  if (project.logo) return { src: project.logo, alt: 'Company logo' };
+  if (isPracticeEmail(email)) return { src: paragonLogo, alt: 'Paragon Architects' };
+  return null;
+}
+
+/**
+ * Report title and project name with the logo on the right, sized to sit exactly between them: the top of the logo
+ * lines up with the top of the title's capitals and its bottom with the baseline of the project name (logos are
+ * trimmed to their ink, so the artwork's edges are the letters' edges). The cover font is the device's own, so both
+ * lines are measured from the rendered text rather than fixed.
+ */
+function CoverHeading({ title, name, logo }: { title: string; name: string; logo: { src: string; alt: string } | null }) {
   const wrap = useRef<HTMLDivElement>(null);
   const h1 = useRef<HTMLHeadingElement>(null);
   const titleBase = useRef<HTMLSpanElement>(null);
   const nameBase = useRef<HTMLSpanElement>(null);
-  const [box, setBox] = useState<{ top: number; height: number } | null>(null);
+  const [band, setBand] = useState<{ top: number; height: number } | null>(null);
+  const [loaded, setLoaded] = useState<{ src: string; ratio: number } | null>(null);
+  const ratio = logo && loaded?.src === logo.src ? loaded.ratio : null;
   useLayoutEffect(() => {
+    if (!logo) return;
     const fit = () => {
       const w = wrap.current, el = h1.current, tb = titleBase.current, nb = nameBase.current;
       const ctx = document.createElement('canvas').getContext('2d');
@@ -37,20 +52,26 @@ function CoverHeading({ title, name }: { title: string; name: string }) {
       const y0 = w.getBoundingClientRect().top;
       const top = tb.getBoundingClientRect().bottom - y0 - capTop; // top of the title's capitals
       const bottom = nb.getBoundingClientRect().bottom - y0; // baseline of the project name's first line
-      if (capTop > 0 && bottom > top) setBox((b) => (b && Math.abs(b.top - top) < 0.1 && Math.abs(b.height - (bottom - top)) < 0.1 ? b : { top, height: bottom - top }));
+      if (capTop > 0 && bottom > top) setBand((b) => (b && Math.abs(b.top - top) < 0.1 && Math.abs(b.height - (bottom - top)) < 0.1 ? b : { top, height: bottom - top }));
     };
     fit();
     void document.fonts?.ready.then(fit);
     window.addEventListener('beforeprint', fit);
     return () => window.removeEventListener('beforeprint', fit);
-  }, [title, name]);
-  const width = box ? box.height * LOGO_RATIO : undefined;
+  }, [title, name, logo]);
+  let box: { top: number; width: number; height: number } | null = null;
+  if (logo && band && ratio) {
+    const maxW = (LOGO_MAX_W_MM * 96) / 25.4;
+    const width = Math.min(band.height * ratio, maxW), height = width / ratio;
+    box = { top: band.top + (band.height - height) / 2, width, height };
+  }
   return (
-    <div ref={wrap} className="cover-heading" style={width ? ({ '--logo-w': `${width}px` } as React.CSSProperties) : undefined}>
+    <div ref={wrap} className={`cover-heading${logo ? ' has-logo' : ''}`} style={box ? ({ '--logo-w': `${box.width}px` } as React.CSSProperties) : undefined}>
       <h1 ref={h1} data-testid="report-title-row"><span ref={titleBase} className="baseline-probe" aria-hidden="true" /><span data-testid="report-title">{title}</span></h1>
       <h2><span ref={nameBase} className="baseline-probe" aria-hidden="true" />{name}</h2>
-      <img className="cover-logo" src={paragonLogo} alt="Paragon Architects" data-testid="report-logo"
-        style={box ? { top: box.top, height: box.height, width } : { visibility: 'hidden' }} />
+      {logo && <img className="cover-logo" src={logo.src} alt={logo.alt} data-testid="report-logo"
+        onLoad={(e) => { const i = e.currentTarget; if (logo && i.naturalWidth && i.naturalHeight) setLoaded({ src: logo.src, ratio: i.naturalWidth / i.naturalHeight }); }}
+        style={box ? { top: box.top, height: box.height, width: box.width } : { visibility: 'hidden' }} />}
     </div>
   );
 }
@@ -87,6 +108,7 @@ function ReportImage({ id, load, alt, className, track }: { id: string; load: ()
 
 export function ReportView({ projectId }: { projectId: string }) {
   const [bundle, setBundle] = useState<repo.ProjectBundle | null>(null);
+  const profile = useProfile();
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>({ loaded: 0, total: 0, failed: [] });
   const [snaps, setSnaps] = useState<Record<string, Blob>>({});
@@ -152,6 +174,7 @@ export function ReportView({ projectId }: { projectId: string }) {
   if (error) return <div className="page"><main className="content"><p className="error">{error}</p><a href="#/">Back to projects</a></main></div>;
   if (!bundle || !model) return <div className="page"><main className="content"><p role="status">Preparing report…</p></main></div>;
   const p = bundle.project;
+  const logo = coverLogo(p, profile?.email);
   const photoLoader = (assetId: string) => async () => { const a = assets.get(assetId); return a ? bundle.blobs.get(a.displayBlobId) : undefined; };
 
   return (
@@ -170,7 +193,7 @@ export function ReportView({ projectId }: { projectId: string }) {
       {status.failed.length > 0 && <div className="banner warn no-print" role="alert">This report is incomplete and should not be issued: {status.failed.slice(0, 5).join('; ')}.</div>}
       <article className="report" data-testid="report">
         <header className="cover">
-          <CoverHeading title={reportTitleOf(p)} name={p.name} />
+          <CoverHeading title={reportTitleOf(p)} name={p.name} logo={logo} />
           <dl className="meta">
             <dt>Reference</dt><dd>{p.reference || '—'}</dd>
             <dt>Property / site</dt><dd>{p.siteName || '—'}</dd>

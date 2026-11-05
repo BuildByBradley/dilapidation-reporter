@@ -147,8 +147,7 @@ fieldset.warn { border: 1px solid var(--warn-line); background: var(--warn); bor
 .report { background: #fff; width: 210mm; max-width: 100%; margin: 12px auto; padding: 16mm 15mm; box-shadow: 0 2px 12px rgba(0,0,0,.2); font-size: 10.5pt; color: #111; }
 .report .cover { padding: 10mm 0 8mm; border-bottom: 2px solid #111; margin-bottom: 8mm; }
 .report .cover-heading { position: relative; --logo-w: 45mm; }
-.report .cover-heading h1 { padding-right: calc(var(--logo-w) + 8mm); }
-.report .cover-heading h2 { padding-right: calc(var(--logo-w) + 8mm); }
+.report .cover-heading.has-logo h1, .report .cover-heading.has-logo h2 { padding-right: calc(var(--logo-w) + 8mm); }
 .report .cover-heading .cover-logo { position: absolute; right: 0; max-width: none; }
 .report .cover-heading .baseline-probe { display: inline-block; width: 0; height: 0; vertical-align: baseline; }
 .report .eyebrow { text-transform: uppercase; letter-spacing: .1em; font-size: 9pt; color: #555; margin: 0; }
@@ -421,3 +420,7 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; margin: 0; f
 .storage-facts { margin: 6px 0 10px; padding-left: 18px; }
 .check { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; }
 .check input { margin-top: 4px; }
+
+.logo-field .field-label { display: block; margin-bottom: 4px; }
+.logo-field .logo-preview { max-height: 48px; max-width: 200px; object-fit: contain; border: 1px solid var(--line, #ddd); padding: 4px; background: #fff; }
+.profile-form { margin: 8px 0; }

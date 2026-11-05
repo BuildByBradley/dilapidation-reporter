@@ -15,6 +15,8 @@ export type Project = {
   summary?: string;
   /** Heading on the report cover (e.g. "Works Completion List"). Empty: DEFAULT_REPORT_TITLE. */
   reportTitle?: string;
+  /** Company logo for the report cover (PNG data URL, trimmed to its ink). Empty: practice logo rules apply. */
+  logo?: string;
   isSample?: boolean;
   createdAt: string; updatedAt: string;
 };

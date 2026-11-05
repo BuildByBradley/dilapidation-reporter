@@ -84,6 +84,41 @@ export async function refreshRoles(): Promise<void> {
   if (!r.error) setRoles(new Map((r.data as { project_id: string; role: Role }[]).map((x) => [x.project_id, x.role])));
 }
 
+// ---------- who is signed in: name and company (shown as the inspector) ----------
+export type Profile = { email: string; name: string; company: string };
+/** Accounts on this domain may put the Paragon Architects logo on their reports. */
+export const PRACTICE_DOMAIN = 'paragon.co.za';
+export const isPracticeEmail = (email?: string | null) => !!email && email.trim().toLowerCase().endsWith(`@${PRACTICE_DOMAIN}`);
+let profile: Profile | null = null;
+const profileListeners = new Set<() => void>();
+function setProfileFrom(session: Session | null) {
+  const u = session?.user;
+  const next = u ? {
+    email: u.email ?? '',
+    name: String(u.user_metadata?.full_name ?? '').trim(),
+    company: String(u.user_metadata?.company ?? '').trim() || (isPracticeEmail(u.email) ? 'Paragon Architects' : ''),
+  } : null;
+  if (JSON.stringify(next) === JSON.stringify(profile)) return;
+  profile = next; profileListeners.forEach((l) => l());
+}
+const useProfileRaw = () => useSyncExternalStore((l) => { profileListeners.add(l); return () => { profileListeners.delete(l); }; }, () => profile);
+/** The signed-in (and fully verified) account's profile, or null when not signed in. */
+export function useProfile(): Profile | null {
+  const s = useCloudState();
+  const p = useProfileRaw();
+  return syncing(s) ? p : null;
+}
+/** "John Jantjies - Easy Electricians" (whichever parts are filled in). */
+export const inspectorLabel = (p: Profile | null) => (p ? [p.name, p.company].filter(Boolean).join(' - ') : '');
+export const currentInspector = () => (syncing(state) ? inspectorLabel(profile) : '');
+export async function saveProfile(name: string, company: string): Promise<void> {
+  if (!client) throw new Error('Cloud sync is not available in this build.');
+  const { data, error } = await client.auth.updateUser({ data: { full_name: name.trim(), company: company.trim() } });
+  if (error) throw new Error(error.message);
+  const { data: sd } = await client.auth.getSession();
+  setProfileFrom(sd.session ?? (data.user ? ({ user: data.user } as Session) : null));
+}
+
 // ---------- whose projects are on this device ----------
 /**
  * Once an account has synced on this device, its projects stay locked behind that account: signed out (or with an
@@ -242,6 +277,7 @@ export function initCloud(): void {
   client = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'implicit' } });
   client.auth.onAuthStateChange((event, session) => {
     if (event === 'PASSWORD_RECOVERY') setRecovering(true);
+    setProfileFrom(session);
     setTimeout(() => { void startEngine(session).finally(setAuthReady); }, 0);
   });
   const kick = () => { if (engine && mode === 'auto') { void engine.pull().catch(() => {}); engine.schedulePush(0); } };

@@ -18,6 +18,7 @@ import { useLive } from '../../lib/useLive';
 import { RenumberDialog } from '../findings/RenumberDialog';
 import type { Asset, Category, Finding, Floor, InteractionMode, Photo, ViewerMode } from '../../lib/types';
 import { DEFAULT_REPORT_TITLE, REPORT_TITLE_SUGGESTIONS } from '../../lib/types';
+import { InspectorField, LogoField } from '../projects/ProjectFields';
 import { CategoriesDialog } from '../categories/CategoriesDialog';
 import { FindingEditor } from '../findings/FindingEditor';
 import { FindingsList } from '../findings/FindingsList';
@@ -367,7 +368,7 @@ export function Workspace({ projectId }: { projectId: string }) {
 
 function ProjectDetails({ project, onClose, readOnly }: { project: ProjectT; onClose: () => void; readOnly: boolean }) {
   const toast = useToast();
-  const [d, setD] = useState({ name: project.name, siteName: project.siteName, address: project.address, client: project.client, inspector: project.inspector, inspectionDate: project.inspectionDate, reference: project.reference, notes: project.notes, summary: project.summary ?? '', reportTitle: project.reportTitle ?? '' });
+  const [d, setD] = useState({ name: project.name, siteName: project.siteName, address: project.address, client: project.client, inspector: project.inspector, inspectionDate: project.inspectionDate, reference: project.reference, notes: project.notes, summary: project.summary ?? '', reportTitle: project.reportTitle ?? '', logo: project.logo ?? '' });
   const draft = async () => {
     const text = draftSummary(buildReportModel(await repo.loadBundle(project.id)), d);
     if (d.summary.trim() && !window.confirm('Replace the current summary with a fresh draft from the findings?')) return;
@@ -385,9 +386,10 @@ function ProjectDetails({ project, onClose, readOnly }: { project: ProjectT; onC
         <label>Property / site<input value={d.siteName} onChange={set('siteName')} /></label>
         <label className="span2">Address<input value={d.address} onChange={set('address')} /></label>
         <label>Client<input value={d.client} onChange={set('client')} /></label>
-        <label>Inspector<input value={d.inspector} onChange={set('inspector')} /></label>
+        <InspectorField value={d.inspector} onChange={(v) => setD({ ...d, inspector: v })} disabled={readOnly} />
         <label>Inspection date<input type="date" value={d.inspectionDate} onChange={set('inspectionDate')} /></label>
         <label>Reference<input value={d.reference} onChange={set('reference')} /></label>
+        <LogoField value={d.logo} onChange={(v) => setD({ ...d, logo: v })} disabled={readOnly} />
         <label className="span2">Notes<textarea rows={3} value={d.notes} onChange={set('notes')} /></label>
         <label className="span2">Report summary <span className="muted small">(the Summary page of the report — what the client reads first)</span>
           <textarea rows={7} value={d.summary} onChange={set('summary')} placeholder="Overall condition, the main issues and what needs attention. Use “Draft from findings” for a first version." />

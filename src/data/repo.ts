@@ -21,7 +21,7 @@ export type ProjectBundle = {
 export class RepoError extends Error {}
 
 // ---------- projects ----------
-export type ProjectInput = Partial<Pick<Project, 'name' | 'siteName' | 'address' | 'client' | 'inspector' | 'inspectionDate' | 'reference' | 'notes' | 'summary' | 'reportTitle'>>;
+export type ProjectInput = Partial<Pick<Project, 'name' | 'siteName' | 'address' | 'client' | 'inspector' | 'inspectionDate' | 'reference' | 'notes' | 'summary' | 'reportTitle' | 'logo'>>;
 
 export async function createProject(input: ProjectInput = {}, opts: { isSample?: boolean } = {}): Promise<Project> {
   return tracked(async () => {
@@ -29,7 +29,7 @@ export async function createProject(input: ProjectInput = {}, opts: { isSample?:
     const project: Project = {
       id: uuid(), name: input.name?.trim() || 'Untitled inspection', siteName: input.siteName ?? '', address: input.address ?? '',
       client: input.client ?? '', inspector: input.inspector ?? '', inspectionDate: input.inspectionDate || t.slice(0, 10),
-      reference: input.reference ?? '', notes: input.notes ?? '', ...(input.reportTitle?.trim() ? { reportTitle: input.reportTitle.trim() } : {}), nextFindingNumber: 1, isSample: opts.isSample, createdAt: t, updatedAt: t,
+      reference: input.reference ?? '', notes: input.notes ?? '', ...(input.reportTitle?.trim() ? { reportTitle: input.reportTitle.trim() } : {}), ...(input.logo ? { logo: input.logo } : {}), nextFindingNumber: 1, isSample: opts.isSample, createdAt: t, updatedAt: t,
     };
     const floors: Floor[] = Array.from({ length: FLOOR_COUNT }, (_, i) => ({
       id: uuid(), projectId: project.id, name: DEFAULT_FLOOR_NAMES[i], order: i, displayWidth: 100, createdAt: t, updatedAt: t,

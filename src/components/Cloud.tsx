@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Dialog } from './ui';
 import {
-  cancelRecovery, finishTwoFactorSetup, sendPasswordReset, setSyncMode, signIn, signOut, signUp, syncBeforeSignOut, startTwoFactorSetup, submitMfaCode, syncNow,
+  cancelRecovery, finishTwoFactorSetup, sendPasswordReset, setSyncMode, signIn, signOut, signUp, syncBeforeSignOut, saveProfile, useProfile, inspectorLabel, startTwoFactorSetup, submitMfaCode, syncNow,
   twoFactorDevices, updatePassword, completeMfaSetup,
   useCloudState, useRecovering, useSyncMode, type CloudState,
 } from '../sync/cloud';
@@ -109,6 +109,40 @@ function ModeChooser() {
   );
 }
 
+/** Name and company of the signed-in person: filled in as the inspector on their inspections. */
+function ProfileForm() {
+  const p = useProfile();
+  const [name, setName] = useState(p?.name ?? '');
+  const [company, setCompany] = useState(p?.company ?? '');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ tone: 'error' | 'ok'; text: string } | null>(null);
+  const [open, setOpen] = useState(!p?.name);
+  useEffect(() => { setName(p?.name ?? ''); setCompany(p?.company ?? ''); }, [p?.name, p?.company]);
+  if (!p) return null;
+  if (!open) {
+    return (
+      <p className="small" data-testid="profile-line"><strong>Inspector name:</strong> {inspectorLabel(p) || '—'} <button className="link" onClick={() => setOpen(true)}>Change</button></p>
+    );
+  }
+  return (
+    <form className="profile-form" data-testid="profile-form" onSubmit={(e) => {
+      e.preventDefault();
+      if (!name.trim()) { setMsg({ tone: 'error', text: 'Enter your name.' }); return; }
+      setBusy(true); setMsg(null);
+      saveProfile(name, company).then(() => setOpen(false)).catch((err) => setMsg({ tone: 'error', text: err instanceof Error ? err.message : String(err) })).finally(() => setBusy(false));
+    }}>
+      <p className="small muted">Your name and company are filled in as the <b>Inspector</b> on the inspections you capture, e.g. “John Jantjies - Easy Electricians”.</p>
+      <div className="row">
+        <label className="grow">Your name<input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" /></label>
+        <label className="grow">Company<input value={company} onChange={(e) => setCompany(e.target.value)} autoComplete="organization" /></label>
+        <button className="primary" type="submit" disabled={busy}>Save name</button>
+        {p.name && <button type="button" onClick={() => setOpen(false)}>Cancel</button>}
+      </div>
+      {msg && <p className={msg.tone === 'error' ? 'error' : 'ok'} role="status">{msg.text}</p>}
+    </form>
+  );
+}
+
 /** Sign-in / account panel on the projects page. */
 export function CloudPanel({ defaultEmail = '' }: { defaultEmail?: string } = {}) {
   const s = useCloudState();
@@ -167,6 +201,7 @@ export function CloudPanel({ defaultEmail = '' }: { defaultEmail?: string } = {}
         </div>
         <p className="small muted">Signed out, this device keeps none of your projects: they stay in the cloud and come back when you sign in again.</p>
         <p className="small muted">Signed in as <strong>{s.email}</strong>. {d.detail}</p>
+        <ProfileForm />
         <ModeChooser />
         {changing ? (
           <form className="row" onSubmit={(e) => { e.preventDefault(); void run(async () => { await updatePassword(newPw); setChanging(false); setNewPw(''); return 'Password changed.'; }); }}>

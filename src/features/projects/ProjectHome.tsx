@@ -11,10 +11,11 @@ import { SaveIndicator } from '../../components/SaveIndicator';
 import { CloudPanel, CloudStatus } from '../../components/Cloud';
 import { StorageBar } from '../../components/StorageBar';
 import { HelpButton } from '../../components/Help';
-import { clearDevice, leaveProject, useDeviceLock, useProjectRole } from '../../sync/cloud';
+import { clearDevice, currentInspector, leaveProject, useDeviceLock, useProjectRole } from '../../sync/cloud';
+import { InspectorField, LogoField } from './ProjectFields';
 
 type Details = Required<Omit<repo.ProjectInput, 'summary'>>;
-const empty = (): Details => ({ name: '', siteName: '', address: '', client: '', inspector: '', inspectionDate: new Date().toISOString().slice(0, 10), reference: '', notes: '', reportTitle: '' });
+const empty = (): Details => ({ name: '', siteName: '', address: '', client: '', inspector: currentInspector(), inspectionDate: new Date().toISOString().slice(0, 10), reference: '', notes: '', reportTitle: '', logo: '' });
 
 function DetailsDialog({ initial, title, onSave, onClose }: { initial: Details; title: string; onSave: (d: Details) => Promise<void>; onClose: () => void }) {
   const [d, setD] = useState(initial);
@@ -32,9 +33,10 @@ function DetailsDialog({ initial, title, onSave, onClose }: { initial: Details; 
         <label>Property / site name<input value={d.siteName} onChange={set('siteName')} /></label>
         <label className="span2">Address<input value={d.address} onChange={set('address')} /></label>
         <label>Client<input value={d.client} onChange={set('client')} /></label>
-        <label>Inspector<input value={d.inspector} onChange={set('inspector')} /></label>
+        <InspectorField value={d.inspector} onChange={(v) => setD({ ...d, inspector: v })} />
         <label>Inspection date<input type="date" value={d.inspectionDate} onChange={set('inspectionDate')} /></label>
         <label>Reference number<input value={d.reference} onChange={set('reference')} /></label>
+        <LogoField value={d.logo} onChange={(v) => setD({ ...d, logo: v })} />
         <label className="span2">General notes<textarea rows={3} value={d.notes} onChange={set('notes')} /></label>
       </form>
     </Dialog>
@@ -176,7 +178,7 @@ export function ProjectHome() {
       {editing && (
         <DetailsDialog
           title={editing === 'new' ? 'New inspection' : 'Project details'}
-          initial={editing === 'new' ? empty() : { name: editing.name, siteName: editing.siteName, address: editing.address, client: editing.client, inspector: editing.inspector, inspectionDate: editing.inspectionDate, reference: editing.reference, notes: editing.notes, reportTitle: editing.reportTitle ?? '' }}
+          initial={editing === 'new' ? empty() : { name: editing.name, siteName: editing.siteName, address: editing.address, client: editing.client, inspector: editing.inspector, inspectionDate: editing.inspectionDate, reference: editing.reference, notes: editing.notes, reportTitle: editing.reportTitle ?? '', logo: editing.logo ?? '' }}
           onClose={() => setEditing(null)}
           onSave={async (d) => {
             try {

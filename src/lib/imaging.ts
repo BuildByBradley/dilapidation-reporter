@@ -165,3 +165,31 @@ export async function downloadBlob(blob: Blob, filename: string): Promise<void> 
   a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
+
+/**
+ * A company logo for the report cover: margins that are white or transparent are trimmed off (so the logo's own
+ * ink lines up with the text), then it is scaled to at most 900 × 400 px and stored as a PNG data URL with the project.
+ */
+export async function prepareLogo(file: Blob): Promise<string> {
+  const bmp = await decodeBitmap(file);
+  const src = scaled(bmp, bmp.width, bmp.height, 2400, false);
+  bmp.close?.();
+  const ctx = src.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new ImportError('Canvas is unavailable in this browser.');
+  const { width: w, height: h } = src;
+  const px = ctx.getImageData(0, 0, w, h).data;
+  const ink = (i: number) => px[i + 3] > 40 && (px[i] < 235 || px[i + 1] < 235 || px[i + 2] < 235);
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (ink((y * w + x) * 4)) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  }
+  if (x1 < 0) throw new ImportError('This image looks blank (all white or transparent).');
+  const cw = x1 - x0 + 1, ch = y1 - y0 + 1;
+  const k = Math.min(1, 900 / cw, 400 / ch);
+  const out = newCanvas(cw * k, ch * k);
+  const o = out.getContext('2d');
+  if (!o) throw new ImportError('Canvas is unavailable in this browser.');
+  o.imageSmoothingQuality = 'high';
+  o.drawImage(src, x0, y0, cw, ch, 0, 0, out.width, out.height);
+  return out.toDataURL('image/png');
+}
