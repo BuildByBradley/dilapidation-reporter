@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { dbAll, openSample } from './helpers';
+import { dbAll, newProject, openSample } from './helpers';
 
 const haveTool = (t: string) => spawnSync('which', [t]).status === 0;
 
@@ -105,4 +105,18 @@ test('A20 printing a long report: legible pages, no clipped content, workspace c
   const imgPages = new Set(execFileSync('pdfimages', ['-list', pdfPath]).toString().trim().split('\n').slice(2).map((l) => l.trim().split(/\s+/)[0]));
   perPage.forEach((t, i) => { if (/BULKCAP-/.test(t)) expect(imgPages.has(String(i + 1)), `page ${i + 1} has captions but no image`).toBe(true); });
   fs.copyFileSync(pdfPath, info.outputPath('long-report.pdf'));
+});
+
+test('the report title can be changed in the project details (e.g. a works completion list)', async ({ page }) => {
+  await newProject(page, 'Title test');
+  await page.getByRole('button', { name: 'Report' }).click();
+  await expect(page.getByTestId('report-title')).toHaveText('Conditioning Report'); // default
+  await page.goto('/#/');
+  await page.getByRole('button', { name: 'Rename / details' }).click();
+  await page.getByLabel(/Report title/).fill('Works Completion List');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  expect((await dbAll(page, 'projects'))[0].reportTitle).toBe('Works Completion List');
+  await page.getByRole('link', { name: 'Title test' }).click();
+  await page.getByRole('button', { name: 'Report' }).click();
+  await expect(page.getByTestId('report-title')).toHaveText('Works Completion List');
 });

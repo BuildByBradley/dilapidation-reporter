@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { go } from '../../app/App';
 import { Confirm, Dialog, fmtTime, useToast } from '../../components/ui';
+import { DEFAULT_REPORT_TITLE, REPORT_TITLE_SUGGESTIONS } from '../../lib/types';
 import * as repo from '../../data/repo';
 import { createBackup, parseBackup, BackupError } from '../../lib/backup';
 import { downloadBlob } from '../../lib/imaging';
@@ -13,7 +14,7 @@ import { HelpButton } from '../../components/Help';
 import { clearDevice, leaveProject, useDeviceLock, useProjectRole } from '../../sync/cloud';
 
 type Details = Required<Omit<repo.ProjectInput, 'summary'>>;
-const empty = (): Details => ({ name: '', siteName: '', address: '', client: '', inspector: '', inspectionDate: new Date().toISOString().slice(0, 10), reference: '', notes: '' });
+const empty = (): Details => ({ name: '', siteName: '', address: '', client: '', inspector: '', inspectionDate: new Date().toISOString().slice(0, 10), reference: '', notes: '', reportTitle: '' });
 
 function DetailsDialog({ initial, title, onSave, onClose }: { initial: Details; title: string; onSave: (d: Details) => Promise<void>; onClose: () => void }) {
   const [d, setD] = useState(initial);
@@ -24,6 +25,10 @@ function DetailsDialog({ initial, title, onSave, onClose }: { initial: Details; 
     <Dialog title={title} onClose={onClose} footer={<><button onClick={onClose}>Cancel</button><button className="primary" disabled={busy} onClick={submit}>Save</button></>}>
       <form className="form-grid" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
         <label>Project name<input value={d.name} onChange={set('name')} autoFocus /></label>
+        <label className="span2">Report title <span className="muted small">(heading on the report cover — pick one or type your own)</span>
+          <input list="report-title-options" value={d.reportTitle} onChange={set('reportTitle')} placeholder={DEFAULT_REPORT_TITLE} />
+          <datalist id="report-title-options">{REPORT_TITLE_SUGGESTIONS.map((t) => <option key={t} value={t} />)}</datalist>
+        </label>
         <label>Property / site name<input value={d.siteName} onChange={set('siteName')} /></label>
         <label className="span2">Address<input value={d.address} onChange={set('address')} /></label>
         <label>Client<input value={d.client} onChange={set('client')} /></label>
@@ -171,7 +176,7 @@ export function ProjectHome() {
       {editing && (
         <DetailsDialog
           title={editing === 'new' ? 'New inspection' : 'Project details'}
-          initial={editing === 'new' ? empty() : { name: editing.name, siteName: editing.siteName, address: editing.address, client: editing.client, inspector: editing.inspector, inspectionDate: editing.inspectionDate, reference: editing.reference, notes: editing.notes }}
+          initial={editing === 'new' ? empty() : { name: editing.name, siteName: editing.siteName, address: editing.address, client: editing.client, inspector: editing.inspector, inspectionDate: editing.inspectionDate, reference: editing.reference, notes: editing.notes, reportTitle: editing.reportTitle ?? '' }}
           onClose={() => setEditing(null)}
           onSave={async (d) => {
             try {

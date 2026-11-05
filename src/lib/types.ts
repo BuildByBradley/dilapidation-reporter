@@ -13,6 +13,8 @@ export type Project = {
   reference: string; notes: string; nextFindingNumber: number;
   /** Executive summary written by the inspector (shown on the report's first pages). */
   summary?: string;
+  /** Heading on the report cover (e.g. "Works Completion List"). Empty: DEFAULT_REPORT_TITLE. */
+  reportTitle?: string;
   isSample?: boolean;
   createdAt: string; updatedAt: string;
 };
@@ -88,3 +90,9 @@ export const LIMITS = {
   pdfPreviewPageLimit: 60,
 };
 export const BACKUP_VERSION = 1;
+
+/** Report cover heading when a project has not set its own. */
+export const DEFAULT_REPORT_TITLE = 'Conditioning Report';
+/** Suggestions offered in the Report title box (any text can be typed). */
+export const REPORT_TITLE_SUGGESTIONS = ['Conditioning Report', 'Dilapidation Report', 'Works Completion List', 'Practical Completion List', 'Snag List', 'Final Completion List'];
+export const reportTitleOf = (p: { reportTitle?: string }) => p.reportTitle?.trim() || DEFAULT_REPORT_TITLE;

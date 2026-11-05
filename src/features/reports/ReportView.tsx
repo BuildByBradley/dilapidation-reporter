@@ -7,6 +7,7 @@ import { downloadBlob, inHostFrame } from '../../lib/imaging';
 import { DETAIL_SPAN, KEY_PLAN_SPAN, insetBlob, planSnapshotBlob } from '../../lib/planSnapshot';
 import { buildCsv, buildReportModel, draftSummary, type ReportFinding, type ReportModel } from '../../lib/report';
 import type { Asset, Project } from '../../lib/types';
+import { reportTitleOf } from '../../lib/types';
 import { SaveIndicator } from '../../components/SaveIndicator';
 
 type Status = { loaded: number; total: number; failed: string[] };
@@ -126,7 +127,7 @@ export function ReportView({ projectId }: { projectId: string }) {
       {status.failed.length > 0 && <div className="banner warn no-print" role="alert">This report is incomplete and should not be issued: {status.failed.slice(0, 5).join('; ')}.</div>}
       <article className="report" data-testid="report">
         <header className="cover">
-          <h1>Conditioning Report</h1>
+          <h1 data-testid="report-title">{reportTitleOf(p)}</h1>
           <h2>{p.name}</h2>
           <dl className="meta">
             <dt>Reference</dt><dd>{p.reference || '—'}</dd>

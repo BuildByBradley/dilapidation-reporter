@@ -17,6 +17,7 @@ import { downloadBlob } from '../../lib/imaging';
 import { useLive } from '../../lib/useLive';
 import { RenumberDialog } from '../findings/RenumberDialog';
 import type { Asset, Category, Finding, Floor, InteractionMode, Photo, ViewerMode } from '../../lib/types';
+import { DEFAULT_REPORT_TITLE, REPORT_TITLE_SUGGESTIONS } from '../../lib/types';
 import { CategoriesDialog } from '../categories/CategoriesDialog';
 import { FindingEditor } from '../findings/FindingEditor';
 import { FindingsList } from '../findings/FindingsList';
@@ -366,7 +367,7 @@ export function Workspace({ projectId }: { projectId: string }) {
 
 function ProjectDetails({ project, onClose, readOnly }: { project: ProjectT; onClose: () => void; readOnly: boolean }) {
   const toast = useToast();
-  const [d, setD] = useState({ name: project.name, siteName: project.siteName, address: project.address, client: project.client, inspector: project.inspector, inspectionDate: project.inspectionDate, reference: project.reference, notes: project.notes, summary: project.summary ?? '' });
+  const [d, setD] = useState({ name: project.name, siteName: project.siteName, address: project.address, client: project.client, inspector: project.inspector, inspectionDate: project.inspectionDate, reference: project.reference, notes: project.notes, summary: project.summary ?? '', reportTitle: project.reportTitle ?? '' });
   const draft = async () => {
     const text = draftSummary(buildReportModel(await repo.loadBundle(project.id)), d);
     if (d.summary.trim() && !window.confirm('Replace the current summary with a fresh draft from the findings?')) return;
@@ -377,6 +378,10 @@ function ProjectDetails({ project, onClose, readOnly }: { project: ProjectT; onC
     <Dialog title="Project details" onClose={onClose} footer={<><button onClick={onClose}>Cancel</button><button className="primary" disabled={readOnly} onClick={async () => { try { await repo.updateProject(project.id, d); onClose(); } catch (e) { toast('error', String(e)); } }}>Save</button></>}>
       <div className="form-grid">
         <label>Project name<input value={d.name} onChange={set('name')} /></label>
+        <label className="span2">Report title <span className="muted small">(heading on the report cover — pick one or type your own)</span>
+          <input list="report-title-options" value={d.reportTitle} onChange={set('reportTitle')} placeholder={DEFAULT_REPORT_TITLE} />
+          <datalist id="report-title-options">{REPORT_TITLE_SUGGESTIONS.map((t) => <option key={t} value={t} />)}</datalist>
+        </label>
         <label>Property / site<input value={d.siteName} onChange={set('siteName')} /></label>
         <label className="span2">Address<input value={d.address} onChange={set('address')} /></label>
         <label>Client<input value={d.client} onChange={set('client')} /></label>
