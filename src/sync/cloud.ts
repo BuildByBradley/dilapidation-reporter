@@ -100,6 +100,7 @@ function setProfileFrom(session: Session | null) {
   } : null;
   if (JSON.stringify(next) === JSON.stringify(profile)) return;
   profile = next; profileListeners.forEach((l) => l());
+  repo.setCreatorEmail(next?.email);
 }
 const useProfileRaw = () => useSyncExternalStore((l) => { profileListeners.add(l); return () => { profileListeners.delete(l); }; }, () => profile);
 /** The signed-in (and fully verified) account's profile, or null when not signed in. */

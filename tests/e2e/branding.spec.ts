@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 import zlib from 'node:zlib';
+import { dbAll } from './helpers';
 
 // Supabase stand-in: password sign-in gives an already two-factor-verified session for the given email; profile edits are kept.
 const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
@@ -33,6 +34,18 @@ async function newInspection(page: Page, name: string) {
   await page.getByRole('button', { name: 'New inspection' }).click();
   await page.getByLabel('Project name').fill(name);
 }
+/** Pretend the open project was created by someone else (as when it was shared with this account). */
+async function setCreator(page: Page, email: string) {
+  await page.evaluate((email) => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open('dilapidation-inspector');
+    open.onsuccess = () => {
+      const db = open.result; const tx = db.transaction('projects', 'readwrite'); const st = tx.objectStore('projects');
+      const all = st.getAll();
+      all.onsuccess = () => { for (const p of all.result) st.put({ ...p, createdBy: email }); };
+      tx.oncomplete = () => { db.close(); resolve(); }; tx.onerror = () => reject(tx.error);
+    };
+  }), email);
+}
 async function openReport(page: Page) {
   await page.getByRole('button', { name: 'Report' }).click();
   await page.waitForURL(/report$/);
@@ -62,7 +75,12 @@ test('a paragon.co.za account gets the Paragon logo; its inspector name is fille
   await openReport(page);
   const logo = page.getByTestId('report-logo');
   await expect(logo).toHaveAttribute('alt', 'Paragon Architects');
-  await expect(logo).toBeVisible();
+  await expect(logo).toBeVisible();  expect((await dbAll(page, 'projects'))[0].createdBy).toBe('bradley@paragon.co.za');
+  // The logo follows the creator, not the viewer: a contractor-created project has no Paragon logo, even for Paragon.
+  await setCreator(page, 'john@easyelectricians.co.za');
+  await page.reload();
+  await expect(page.getByTestId('report-title')).toBeVisible();
+  await expect(page.getByTestId('report-logo')).toHaveCount(0);
 });
 
 test('a contractor gets no Paragon logo, is the inspector, and can add their own logo', async ({ page }) => {
@@ -78,6 +96,14 @@ test('a contractor gets no Paragon logo, is the inspector, and can add their own
   await openReport(page);
   await expect(page.getByTestId('report-logo')).toHaveCount(0);
   await expect(page.getByTestId('report')).toContainText('John Jantjies - Easy Electricians');
+  // A project created by a Paragon account keeps the Paragon logo when the contractor opens it.
+  await setCreator(page, 'bradley@paragon.co.za');
+  await page.reload();
+  await expect(page.getByTestId('report-logo')).toHaveAttribute('alt', 'Paragon Architects');
+  await setCreator(page, 'john@easyelectricians.co.za');
+  await page.reload();
+  await expect(page.getByTestId('report-title')).toBeVisible();
+  await expect(page.getByTestId('report-logo')).toHaveCount(0);
   // add a logo under Project details: margins are trimmed, and it shows on the cover
   await page.goBack();
   await page.getByRole('button', { name: 'Project ▾' }).click();

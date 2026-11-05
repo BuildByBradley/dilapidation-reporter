@@ -21,6 +21,10 @@ export type ProjectBundle = {
 export class RepoError extends Error {}
 
 // ---------- projects ----------
+/** Email of whoever is signed in on this device (set by the sync layer), recorded as a new project's creator. */
+let creatorEmail: string | undefined;
+export function setCreatorEmail(email: string | undefined) { creatorEmail = email || undefined; }
+
 export type ProjectInput = Partial<Pick<Project, 'name' | 'siteName' | 'address' | 'client' | 'inspector' | 'inspectionDate' | 'reference' | 'notes' | 'summary' | 'reportTitle' | 'logo'>>;
 
 export async function createProject(input: ProjectInput = {}, opts: { isSample?: boolean } = {}): Promise<Project> {
@@ -29,7 +33,7 @@ export async function createProject(input: ProjectInput = {}, opts: { isSample?:
     const project: Project = {
       id: uuid(), name: input.name?.trim() || 'Untitled inspection', siteName: input.siteName ?? '', address: input.address ?? '',
       client: input.client ?? '', inspector: input.inspector ?? '', inspectionDate: input.inspectionDate || t.slice(0, 10),
-      reference: input.reference ?? '', notes: input.notes ?? '', ...(input.reportTitle?.trim() ? { reportTitle: input.reportTitle.trim() } : {}), ...(input.logo ? { logo: input.logo } : {}), nextFindingNumber: 1, isSample: opts.isSample, createdAt: t, updatedAt: t,
+      reference: input.reference ?? '', notes: input.notes ?? '', ...(input.reportTitle?.trim() ? { reportTitle: input.reportTitle.trim() } : {}), ...(input.logo ? { logo: input.logo } : {}), ...(creatorEmail ? { createdBy: creatorEmail } : {}), nextFindingNumber: 1, isSample: opts.isSample, createdAt: t, updatedAt: t,
     };
     const floors: Floor[] = Array.from({ length: FLOOR_COUNT }, (_, i) => ({
       id: uuid(), projectId: project.id, name: DEFAULT_FLOOR_NAMES[i], order: i, displayWidth: 100, createdAt: t, updatedAt: t,
@@ -136,6 +140,8 @@ export async function saveBundleAsNew(b: ProjectBundle, nameSuffix = ''): Promis
     const m = (id: string) => { let n = map.get(id); if (!n) { n = uuid(); map.set(id, n); } return n; };
     const t = nowIso();
     const project: Project = { ...b.project, id: uuid(), name: b.project.name + nameSuffix, createdAt: t, updatedAt: t };
+    // A copy belongs to whoever made it (a copy made while signed out keeps the original creator).
+    if (creatorEmail) project.createdBy = creatorEmail;
     const pid = project.id;
     const mo = (id?: string) => (id ? m(id) : undefined);
     const floors = b.floors.map((f): Floor => ({ ...f, id: m(f.id), projectId: pid, planAssetId: mo(f.planAssetId) }));

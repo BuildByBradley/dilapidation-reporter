@@ -10,7 +10,7 @@ import type { Asset, Project } from '../../lib/types';
 import { reportTitleOf } from '../../lib/types';
 import { SaveIndicator } from '../../components/SaveIndicator';
 import paragonLogo from '../../assets/paragon-logo.png';
-import { isPracticeEmail, useProfile } from '../../sync/cloud';
+import { isPracticeEmail, listMembers, useProfile, useProjectRole } from '../../sync/cloud';
 
 type Status = { loaded: number; total: number; failed: string[] };
 
@@ -18,12 +18,32 @@ type Status = { loaded: number; total: number; failed: string[] };
 const LOGO_MAX_W_MM = 75;
 /**
  * Which logo goes on the cover: the project's own logo if one was added under Project details; otherwise the
- * Paragon Architects logo, but only for someone signed in with a paragon.co.za address; otherwise none.
+ * Paragon Architects logo, but only for a project created by a paragon.co.za account; otherwise none.
+ * The logo follows the project's creator, so everyone who opens the report sees the same cover.
  */
-export function coverLogo(project: Pick<Project, 'logo'>, email: string | null | undefined): { src: string; alt: string } | null {
+export function coverLogo(project: Pick<Project, 'logo'>, creatorEmail: string | null | undefined): { src: string; alt: string } | null {
   if (project.logo) return { src: project.logo, alt: 'Company logo' };
-  if (isPracticeEmail(email)) return { src: paragonLogo, alt: 'Paragon Architects' };
+  if (isPracticeEmail(creatorEmail)) return { src: paragonLogo, alt: 'Paragon Architects' };
   return null;
+}
+
+/**
+ * Who created the project. Projects made before this was recorded fall back to their owner: the person viewing,
+ * when it is their own (or only on this device), otherwise the owner listed for the shared project.
+ */
+function useCreatorEmail(projectId: string, createdBy: string | undefined): string | null {
+  const me = useProfile()?.email ?? null;
+  const role = useProjectRole(projectId);
+  const [owner, setOwner] = useState<string | null>(null);
+  const needOwner = !createdBy && !!role && role !== 'owner';
+  useEffect(() => {
+    if (!needOwner) return;
+    let live = true;
+    listMembers(projectId).then((m) => { if (live) setOwner(m.find((x) => x.role === 'owner')?.email ?? null); }).catch(() => {});
+    return () => { live = false; };
+  }, [projectId, needOwner]);
+  if (createdBy) return createdBy;
+  return needOwner ? owner : me;
 }
 
 /**
@@ -108,7 +128,7 @@ function ReportImage({ id, load, alt, className, track }: { id: string; load: ()
 
 export function ReportView({ projectId }: { projectId: string }) {
   const [bundle, setBundle] = useState<repo.ProjectBundle | null>(null);
-  const profile = useProfile();
+  const creator = useCreatorEmail(projectId, bundle?.project.createdBy);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>({ loaded: 0, total: 0, failed: [] });
   const [snaps, setSnaps] = useState<Record<string, Blob>>({});
@@ -174,7 +194,7 @@ export function ReportView({ projectId }: { projectId: string }) {
   if (error) return <div className="page"><main className="content"><p className="error">{error}</p><a href="#/">Back to projects</a></main></div>;
   if (!bundle || !model) return <div className="page"><main className="content"><p role="status">Preparing report…</p></main></div>;
   const p = bundle.project;
-  const logo = coverLogo(p, profile?.email);
+  const logo = coverLogo(p, creator);
   const photoLoader = (assetId: string) => async () => { const a = assets.get(assetId); return a ? bundle.blobs.get(a.displayBlobId) : undefined; };
 
   return (

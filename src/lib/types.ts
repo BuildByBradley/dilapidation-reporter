@@ -17,6 +17,8 @@ export type Project = {
   reportTitle?: string;
   /** Company logo for the report cover (PNG data URL, trimmed to its ink). Empty: practice logo rules apply. */
   logo?: string;
+  /** Email of the account that created the project (decides whether the practice logo goes on its report). */
+  createdBy?: string;
   isSample?: boolean;
   createdAt: string; updatedAt: string;
 };
