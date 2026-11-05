@@ -107,7 +107,12 @@ appear on your other devices within seconds; the status light in the top bar sho
   bar, which also shows how many changes are waiting — saves mobile data on site. *Automatic* (default on computers): live.
 * **Passwords:** *Forgot password?* emails a reset link (set the Supabase **Site URL** to the app's address so the link returns
   here); *Change password* is in the account panel.
-* **Signing out** stops syncing on that device and keeps its projects locally.
+* **Signing out** first uploads anything waiting (and warns if something could not be uploaded), then removes the
+  account's projects from that device. They come back from the cloud on the next sign-in.
+* **Device lock:** once an account has synced on a device, its projects are hidden whenever that account is not signed
+  in there (for example the sign-in lapsed). Another person can remove them from the device; a different account
+  signing in clears them first, so one account's projects are never shown to or uploaded into another account.
+* **New accounts** need no invite: email + password (6+ characters) → *Create account* → two-factor set-up.
 
 ## Sharing projects (rev 04)
 

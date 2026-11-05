@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Dialog } from './ui';
 import {
-  cancelRecovery, finishTwoFactorSetup, sendPasswordReset, setSyncMode, signIn, signOut, signUp, startTwoFactorSetup, submitMfaCode, syncNow,
+  cancelRecovery, finishTwoFactorSetup, sendPasswordReset, setSyncMode, signIn, signOut, signUp, syncBeforeSignOut, startTwoFactorSetup, submitMfaCode, syncNow,
   twoFactorDevices, updatePassword, completeMfaSetup,
   useCloudState, useRecovering, useSyncMode, type CloudState,
 } from '../sync/cloud';
@@ -110,9 +110,9 @@ function ModeChooser() {
 }
 
 /** Sign-in / account panel on the projects page. */
-export function CloudPanel() {
+export function CloudPanel({ defaultEmail = '' }: { defaultEmail?: string } = {}) {
   const s = useCloudState();
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(defaultEmail);
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: 'error' | 'ok'; text: string } | null>(null);
@@ -159,8 +159,13 @@ export function CloudPanel() {
           <strong>Cloud sync is on</strong><span className={`cloud-status ${d.tone}`}><span className="dot" aria-hidden="true" />{d.text}</span>
           <span className="spacer" />
           <button className="primary" disabled={s.kind === 'syncing'} onClick={() => syncNow()}>Sync now</button>
-          <button disabled={busy} onClick={() => run(async () => { await signOut(); })}>Sign out</button>
+          <button disabled={busy} onClick={() => run(async () => {
+            const left = await syncBeforeSignOut();
+            if (left > 0 && !window.confirm(`${left} change${left === 1 ? ' has' : 's have'} not reached the cloud yet (no connection?). Signing out now removes ${left === 1 ? 'it' : 'them'} from this device for good.\n\nSign out anyway?`)) return;
+            await signOut();
+          })}>Sign out</button>
         </div>
+        <p className="small muted">Signed out, this device keeps none of your projects: they stay in the cloud and come back when you sign in again.</p>
         <p className="small muted">Signed in as <strong>{s.email}</strong>. {d.detail}</p>
         <ModeChooser />
         {changing ? (
@@ -177,14 +182,17 @@ export function CloudPanel() {
   }
   return (
     <section className="panel cloud-panel" aria-label="Cloud sync">
-      <h2>Sync phone and computer</h2>
-      <p className="small muted">Sign in with the same account on every device to share your inspections. Without signing in, projects stay only in this browser.</p>
+      <h2>Sign in or create an account</h2>
+      <p className="small muted">Sign in with the same account on every device to sync your inspections. Without signing in, projects stay only in this browser.</p>
+      <p className="small muted"><strong>New here?</strong> Type your email, choose a password (at least 6 characters) and tap <i>Create account</i>. No invite is needed.</p>
       <form className="cloud-form" onSubmit={(e) => { e.preventDefault(); void run(async () => { await signIn(email, password); }); }}>
         <label>Email<input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
         <label>Password<input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} /></label>
         <div className="row">
           <button className="primary" type="submit" disabled={busy}>Sign in</button>
-          <button type="button" disabled={busy || !email || password.length < 6} onClick={() => run(async () => {
+          <button type="button" disabled={busy} onClick={() => run(async () => {
+            if (!/^\S+@\S+\.\S+$/.test(email.trim())) throw new Error('Enter your email address first.');
+            if (password.length < 6) throw new Error('Choose a password of at least 6 characters.');
             const needsConfirm = await signUp(email, password);
             return needsConfirm ? 'Account created. Open the confirmation email we sent you, then come back and sign in.' : undefined;
           })}>Create account</button>

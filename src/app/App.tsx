@@ -6,6 +6,7 @@ import { ReportView } from '../features/reports/ReportView';
 import { PasswordRecoveryDialog } from '../components/Cloud';
 import { UpdateBanner } from '../components/UpdateBanner';
 import { JoinPage } from '../features/projects/JoinPage';
+import { useDeviceLock } from '../sync/cloud';
 
 type Route = { name: 'home' } | { name: 'project'; id: string } | { name: 'report'; id: string } | { name: 'join'; token: string };
 function parse(hash: string): Route {
@@ -24,12 +25,15 @@ export function App() {
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
   }, []);
+  // Projects of an account that is not signed in here stay hidden: links to them land on the sign-in page.
+  const locked = useDeviceLock() !== null;
+  const r: Route = locked && (route.name === 'project' || route.name === 'report') ? { name: 'home' } : route;
   return (
     <ToastProvider>
-      {route.name === 'home' && <ProjectHome />}
-      {route.name === 'project' && <Workspace key={route.id} projectId={route.id} />}
-      {route.name === 'report' && <ReportView key={route.id} projectId={route.id} />}
-      {route.name === 'join' && <JoinPage token={route.token} />}
+      {r.name === 'home' && <ProjectHome />}
+      {r.name === 'project' && <Workspace key={r.id} projectId={r.id} />}
+      {r.name === 'report' && <ReportView key={r.id} projectId={r.id} />}
+      {r.name === 'join' && <JoinPage token={r.token} />}
       <PasswordRecoveryDialog />
       <UpdateBanner />
     </ToastProvider>

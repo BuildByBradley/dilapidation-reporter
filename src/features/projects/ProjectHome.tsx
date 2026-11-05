@@ -10,7 +10,7 @@ import { SaveIndicator } from '../../components/SaveIndicator';
 import { CloudPanel, CloudStatus } from '../../components/Cloud';
 import { StorageBar } from '../../components/StorageBar';
 import { HelpButton } from '../../components/Help';
-import { leaveProject, useProjectRole } from '../../sync/cloud';
+import { clearDevice, leaveProject, useDeviceLock, useProjectRole } from '../../sync/cloud';
 
 type Details = Required<Omit<repo.ProjectInput, 'summary'>>;
 const empty = (): Details => ({ name: '', siteName: '', address: '', client: '', inspector: '', inspectionDate: new Date().toISOString().slice(0, 10), reference: '', notes: '' });
@@ -83,6 +83,33 @@ export function ProjectHome() {
     setBusy(label);
     try { await fn(); } catch (e) { toast('error', e instanceof Error ? e.message : String(e)); } finally { setBusy(null); }
   };
+
+  const lock = useDeviceLock();
+  if (lock) {
+    return (
+      <div className="page home">
+        <header className="topbar">
+          <h1>Dilapidation Inspector</h1>
+          <span className="tag">Prototype</span>
+          <span className="spacer" />
+          <CloudStatus />
+          <HelpButton />
+        </header>
+        <main className="content">
+          {lock === 'checking' ? <p role="status">Checking sign-in…</p> : <>
+            <div className="warn-box" data-testid="device-locked">
+              <p><strong>Projects on this device belong to {lock.email}.</strong> Sign in as that account to open them.</p>
+              <p className="small">Not you? Remove them from this device, then sign in or create your own account. Their cloud copy is not affected.</p>
+              <button className="danger" onClick={() => {
+                if (window.confirm(`Remove ${lock.email}'s projects from this device? Anything not yet synced to the cloud is lost.`)) void clearDevice().catch((e) => toast('error', String(e)));
+              }}>Remove from this device</button>
+            </div>
+            <CloudPanel key={lock.email} defaultEmail={lock.email} />
+          </>}
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="page home">

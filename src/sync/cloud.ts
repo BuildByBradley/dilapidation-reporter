@@ -7,6 +7,7 @@ import { SyncEngine, type SyncStatus } from './engine';
 import { migrateLegacyBlobs, supabaseRemote } from './supabaseRemote';
 import * as mfa from './mfa';
 import * as repo from '../data/repo';
+import { useLive } from '../lib/useLive';
 
 /** What the UI shows about cloud sync. */
 export type CloudState =
@@ -83,6 +84,45 @@ export async function refreshRoles(): Promise<void> {
   if (!r.error) setRoles(new Map((r.data as { project_id: string; role: Role }[]).map((x) => [x.project_id, x.role])));
 }
 
+// ---------- whose projects are on this device ----------
+/**
+ * Once an account has synced on this device, its projects stay locked behind that account: signed out (or with an
+ * expired sign-in) they are hidden until the same account signs in again. A different account signing in clears them
+ * first, so one person's projects are never shown to, or uploaded into, someone else's account.
+ */
+const OWNER = 'deviceOwner';
+type DeviceOwner = { uid: string; email: string };
+async function deviceOwner(): Promise<DeviceOwner | null> {
+  const v = (await db.meta.get(OWNER))?.value;
+  try { return v ? (JSON.parse(v) as DeviceOwner) : null; } catch { return null; }
+}
+/** Remove every project and all sync bookkeeping from this device (the cloud copy is untouched). */
+export async function clearDevice(): Promise<void> {
+  await db.transaction('rw', db.tables, async () => { await Promise.all(db.tables.map((t) => t.clear())); });
+}
+/** False until the saved sign-in (if any) has been checked at startup. */
+let authReady = !cloudConfigured;
+const readyListeners = new Set<() => void>();
+const setAuthReady = () => { if (authReady) return; authReady = true; readyListeners.forEach((l) => l()); };
+const useAuthReady = () => useSyncExternalStore((l) => { readyListeners.add(l); return () => { readyListeners.delete(l); }; }, () => authReady);
+const syncing = (s: CloudState) => s.kind !== 'unavailable' && s.kind !== 'signedOut' && s.kind !== 'mfa' && s.kind !== 'mfaSetup';
+
+/**
+ * Projects on this device are locked when they belong to an account that is not signed in here right now.
+ * `null`: not locked. `'checking'`: still restoring the saved sign-in. Otherwise the owning account's email.
+ */
+export function useDeviceLock(): null | 'checking' | { email: string } {
+  const s = useCloudState();
+  const ready = useAuthReady();
+  const [owner, loaded] = useLive(deviceOwner, [], null as DeviceOwner | null);
+  if (s.kind === 'unavailable') return null;
+  if (syncing(s)) return null;
+  if (!loaded) return 'checking';
+  if (!owner) return null;
+  if (!ready) return 'checking';
+  return { email: owner.email };
+}
+
 async function startEngine(session: Session | null) {
   const uid = session?.user.id;
   if (uid === engineUser) return;
@@ -97,6 +137,20 @@ async function startEngine(session: Session | null) {
     set(step.step === 'code' ? { kind: 'mfa', email, factorId: step.factorId } : { kind: 'mfaSetup', email });
     return;
   }
+  const owner = await deviceOwner();
+  if (owner && owner.uid !== uid) {
+    // Another account's projects are on this device: clear them before this account syncs.
+    const has = (await db.projects.count()) > 0;
+    if (has && !window.confirm(`This device holds projects for ${owner.email}. Signing in as ${email} removes them from this device (anything ${owner.email} had not synced yet is lost; the cloud copy is kept).\n\nContinue?`)) {
+      engineUser = undefined; myUser = undefined;
+      await client.auth.signOut().catch(() => {});
+      set({ kind: 'signedOut' });
+      return;
+    }
+    await clearDevice();
+  }
+  if (engineUser !== uid) return;
+  await db.meta.put({ key: OWNER, value: JSON.stringify({ uid, email }) });
   sharingAvailable = await detectSharing(client).catch(() => false);
   if (engineUser !== uid) return; // signed out meanwhile
   engine = new SyncEngine(db, supabaseRemote(client, session.user.id, sharingAvailable), deviceId(), (s) => set({ ...s, email }), () => navigator.onLine, 1200, mode === 'auto');
@@ -188,7 +242,7 @@ export function initCloud(): void {
   client = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'implicit' } });
   client.auth.onAuthStateChange((event, session) => {
     if (event === 'PASSWORD_RECOVERY') setRecovering(true);
-    setTimeout(() => { void startEngine(session); }, 0);
+    setTimeout(() => { void startEngine(session).finally(setAuthReady); }, 0);
   });
   const kick = () => { if (engine && mode === 'auto') { void engine.pull().catch(() => {}); engine.schedulePush(0); } };
   window.addEventListener('online', kick);
@@ -231,10 +285,23 @@ export async function signUp(email: string, password: string): Promise<boolean> 
   return !data.session;
 }
 
-/** Stops syncing on this device. Projects stay on the device; signing in again re-links them. */
+/** Before signing out: upload what is waiting. Returns how many changes still have not reached the cloud. */
+export async function syncBeforeSignOut(): Promise<number> {
+  const e = engine;
+  if (!e) return 0;
+  await Promise.race([e.syncNow(), new Promise((r) => setTimeout(r, 30_000))]);
+  return e.count();
+}
+
+/**
+ * Stops syncing and removes this account's projects from the device, so the next person to use this browser
+ * cannot see them. They stay in the cloud and come back when the account signs in again.
+ * (Signing out half-way through sign-in, before anything synced, leaves the device as it was.)
+ */
 export async function signOut(): Promise<void> {
+  const wasSyncing = !!engine;
   engine?.stop(); engine = undefined; engineUser = undefined; myUser = undefined; setRoles(new Map());
-  await db.transaction('rw', db.sync, db.meta, async () => { await db.sync.clear(); await db.meta.clear(); });
+  if (wasSyncing) await clearDevice();
   await client?.auth.signOut();
   set({ kind: 'signedOut' });
 }
