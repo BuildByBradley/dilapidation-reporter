@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { referenceNumber, referencePrefix } from '../../lib/ids';
 import { go } from '../../app/App';
 import { flushAll } from '../../data/flush';
@@ -9,8 +9,51 @@ import { buildCsv, buildReportModel, draftSummary, type ReportFinding, type Repo
 import type { Asset, Project } from '../../lib/types';
 import { reportTitleOf } from '../../lib/types';
 import { SaveIndicator } from '../../components/SaveIndicator';
+import paragonLogo from '../../assets/paragon-logo.png';
 
 type Status = { loaded: number; total: number; failed: string[] };
+
+/** Logo artwork (assets/paragon-logo.png) is 545 × 167 px, trimmed to the ink: PARAGON's top is the first row, ARCHITECTS' bottom the last. */
+const LOGO_RATIO = 545 / 167;
+/**
+ * Report title and project name with the practice logo on the right, sized to sit exactly between them: the top of
+ * PARAGON lines up with the top of the title's capitals, the bottom of ARCHITECTS with the baseline of the project
+ * name. The cover font is the device's own, so both lines are measured from the rendered text rather than fixed.
+ */
+function CoverHeading({ title, name }: { title: string; name: string }) {
+  const wrap = useRef<HTMLDivElement>(null);
+  const h1 = useRef<HTMLHeadingElement>(null);
+  const titleBase = useRef<HTMLSpanElement>(null);
+  const nameBase = useRef<HTMLSpanElement>(null);
+  const [box, setBox] = useState<{ top: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const fit = () => {
+      const w = wrap.current, el = h1.current, tb = titleBase.current, nb = nameBase.current;
+      const ctx = document.createElement('canvas').getContext('2d');
+      if (!w || !el || !tb || !nb || !ctx) return;
+      const cs = getComputedStyle(el);
+      ctx.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+      const capTop = ctx.measureText(title.replace(/[^A-Z]/g, '') || 'H').actualBoundingBoxAscent;
+      const y0 = w.getBoundingClientRect().top;
+      const top = tb.getBoundingClientRect().bottom - y0 - capTop; // top of the title's capitals
+      const bottom = nb.getBoundingClientRect().bottom - y0; // baseline of the project name's first line
+      if (capTop > 0 && bottom > top) setBox((b) => (b && Math.abs(b.top - top) < 0.1 && Math.abs(b.height - (bottom - top)) < 0.1 ? b : { top, height: bottom - top }));
+    };
+    fit();
+    void document.fonts?.ready.then(fit);
+    window.addEventListener('beforeprint', fit);
+    return () => window.removeEventListener('beforeprint', fit);
+  }, [title, name]);
+  const width = box ? box.height * LOGO_RATIO : undefined;
+  return (
+    <div ref={wrap} className="cover-heading" style={width ? ({ '--logo-w': `${width}px` } as React.CSSProperties) : undefined}>
+      <h1 ref={h1} data-testid="report-title-row"><span ref={titleBase} className="baseline-probe" aria-hidden="true" /><span data-testid="report-title">{title}</span></h1>
+      <h2><span ref={nameBase} className="baseline-probe" aria-hidden="true" />{name}</h2>
+      <img className="cover-logo" src={paragonLogo} alt="Paragon Architects" data-testid="report-logo"
+        style={box ? { top: box.top, height: box.height, width } : { visibility: 'hidden' }} />
+    </div>
+  );
+}
 
 // Limit simultaneous blob reads so a 500-photo report does not decode everything at once.
 let active = 0; const waiting: (() => void)[] = [];
@@ -127,8 +170,7 @@ export function ReportView({ projectId }: { projectId: string }) {
       {status.failed.length > 0 && <div className="banner warn no-print" role="alert">This report is incomplete and should not be issued: {status.failed.slice(0, 5).join('; ')}.</div>}
       <article className="report" data-testid="report">
         <header className="cover">
-          <h1 data-testid="report-title">{reportTitleOf(p)}</h1>
-          <h2>{p.name}</h2>
+          <CoverHeading title={reportTitleOf(p)} name={p.name} />
           <dl className="meta">
             <dt>Reference</dt><dd>{p.reference || '—'}</dd>
             <dt>Property / site</dt><dd>{p.siteName || '—'}</dd>

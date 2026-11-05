@@ -111,6 +111,8 @@ test('the report title can be changed in the project details (e.g. a works compl
   await newProject(page, 'Title test');
   await page.getByRole('button', { name: 'Report' }).click();
   await expect(page.getByTestId('report-title')).toHaveText('Conditioning Report'); // default
+  await expect(page.getByTestId('report-logo')).toBeVisible();
+  expect(await page.getByTestId('report-logo').evaluate((i: HTMLImageElement) => i.naturalWidth)).toBeGreaterThan(0);
   await page.goto('/#/');
   await page.getByRole('button', { name: 'Rename / details' }).click();
   await page.getByLabel(/Report title/).fill('Works Completion List');
