@@ -7,31 +7,37 @@ test('add a floor and remove an empty one', async ({ page }) => {
   await page.getByRole('button', { name: '+ Add floor' }).click();
   await expect(page.getByTestId('floor-slot')).toHaveCount(6);
   await expect(page.getByTestId('floor-slot').last()).toContainText('Level 5');
-  page.once('dialog', (d) => void d.accept());
-  await page.getByRole('button', { name: 'Remove Level 5' }).click();
+  page.once('dialog', (d) => { expect(d.message()).toContain('Are you sure'); void d.accept(); });
+  await page.getByRole('button', { name: 'Remove floor: Level 5' }).click();
   await expect(page.getByTestId('floor-slot')).toHaveCount(5);
-  // a floor with findings can be removed too, after a warning that names how many go with it
-  const before = (await dbAll(page, 'findings')).length;
-  const onGround = await page.getByTestId('floor-slot').first().getByText(/\d+ findings?/).textContent();
-  const n = Number(/\d+/.exec(onGround ?? '')![0]);
-  expect(n).toBeGreaterThan(0);
-  page.once('dialog', (d) => { expect(d.message()).toContain('Are you sure'); expect(d.message()).toContain(`All ${n} finding`); void d.accept(); });
-  await page.getByRole('button', { name: 'Remove Ground' }).click();
-  await expect(page.getByTestId('floor-slot')).toHaveCount(4);
-  await expect(page.getByTestId('floor-slot').first()).not.toContainText('Ground');
-  await expect.poll(async () => (await dbAll(page, 'findings')).length).toBe(before - n);
 });
 
-test('remove a plan from a floor; the floor stays and can take a new plan', async ({ page }) => {
+test('one remove button steps through pins, then plan, then floor, confirming each', async ({ page }) => {
   await openSample(page);
   const ground = page.getByTestId('floor-slot').first();
-  await expect(ground).not.toContainText('No plan');
-  page.once('dialog', (d) => { expect(d.message()).toMatch(/also deletes its \d+ finding/); void d.accept(); });
-  await page.getByRole('button', { name: 'Remove plan from Ground' }).click();
+  const n = Number(/\d+/.exec((await ground.getByText(/\d+ findings?/).textContent()) ?? '')![0]);
+  expect(n).toBeGreaterThan(0);
+  const before = (await dbAll(page, 'findings')).length;
+  await expect(ground.getByRole('button', { name: /^Remove/ })).toHaveCount(1);
+  // cancelling changes nothing
+  page.once('dialog', (d) => void d.dismiss());
+  await ground.getByRole('button', { name: 'Remove pins: Ground' }).click();
+  await expect(ground).toContainText(`${n} finding`);
+  // 1. pins
+  page.once('dialog', (d) => { expect(d.message()).toContain(`remove all ${n} pin`); void d.accept(); });
+  await ground.getByRole('button', { name: 'Remove pins: Ground' }).click();
+  await expect(ground).toContainText('0 findings');
+  await expect.poll(async () => (await dbAll(page, 'findings')).length).toBe(before - n);
+  // 2. plan
+  page.once('dialog', (d) => { expect(d.message()).toContain('remove the plan'); void d.accept(); });
+  await ground.getByRole('button', { name: 'Remove plan: Ground' }).click();
   await expect(ground).toContainText('No plan');
-  await expect(page.getByTestId('floor-slot')).toHaveCount(5);
-  await expect(page.getByRole('button', { name: 'Remove plan from Ground' })).toHaveCount(0);
   await expect(ground.getByRole('button', { name: 'Import', exact: true })).toBeVisible();
+  // 3. floor
+  page.once('dialog', (d) => { expect(d.message()).toContain('remove the floor'); void d.accept(); });
+  await ground.getByRole('button', { name: 'Remove floor: Ground' }).click();
+  await expect(page.getByTestId('floor-slot')).toHaveCount(4);
+  await expect(page.getByTestId('floor-slot').first()).not.toContainText('Ground');
 });
 
 test('draw on a camera photo before using it; the drawing is saved in the photo', async ({ page }) => {

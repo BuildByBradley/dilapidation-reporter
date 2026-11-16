@@ -4,6 +4,35 @@ import * as repo from '../../data/repo';
 import { useToast } from '../../components/ui';
 import type { Floor, ViewerMode } from '../../lib/types';
 
+/**
+ * One remove button that works in steps, each with its own confirmation:
+ * pins on the floor → "Remove pins"; then a plan → "Remove plan"; then an empty floor → "Remove floor".
+ */
+function RemoveStep({ floor: f, findings: n, isLast, readOnly, guard }: {
+  floor: Floor; findings: number; isLast: boolean; readOnly: boolean; guard(p: Promise<unknown>): void;
+}) {
+  const toast = useToast();
+  const s = n === 1 ? '' : 's';
+  const step = n > 0 ? {
+    label: 'Remove pins',
+    confirm: `Are you sure you want to remove all ${n} pin${s} from "${f.name}"?\n\nThe ${n} finding${s} and their photos will be deleted. The floor plan stays. This cannot be undone.`,
+    run: () => repo.removeFloorFindings(f.id).then(() => toast('ok', `Pins removed from ${f.name}`)),
+  } : f.planAssetId ? {
+    label: 'Remove plan',
+    confirm: `Are you sure you want to remove the plan from "${f.name}"?\n\nThe floor stays, so you can import a new plan later.`,
+    run: () => repo.removeFloorPlan(f.id).then(() => toast('ok', `Plan removed from ${f.name}`)),
+  } : isLast ? null : {
+    label: 'Remove floor',
+    confirm: `Are you sure you want to remove the floor "${f.name}"?`,
+    run: () => repo.deleteFloor(f.id).then(() => toast('ok', `${f.name} removed`)),
+  };
+  if (!step) return null;
+  return (
+    <button className="danger" disabled={readOnly} aria-label={`${step.label}: ${f.name}`}
+      onClick={() => { if (window.confirm(step.confirm)) guard(step.run()); }}>{step.label}</button>
+  );
+}
+
 export function FloorList({ floors, counts, mode, readOnly, onSelect, onImport, onOverview, projectId }: {
   floors: Floor[]; counts: Record<string, number>; mode: ViewerMode; readOnly: boolean;
   onSelect(id: string): void; onImport(id: string): void; onOverview(): void; projectId: string;
@@ -36,27 +65,10 @@ export function FloorList({ floors, counts, mode, readOnly, onSelect, onImport, 
               ) : (
                 <>
                   <button disabled={readOnly} onClick={() => onImport(f.id)}>{f.planAssetId ? 'Replace' : 'Import'}</button>
-                  {f.planAssetId && (
-                    <button className="danger" disabled={readOnly} aria-label={`Remove plan from ${f.name}`}
-                      onClick={() => {
-                        const n = counts[f.id] ?? 0;
-                        const msg = `Remove the plan from "${f.name}"?` + (n ? `\n\nThis also deletes its ${n} finding${n === 1 ? '' : 's'} and their photos.` : '') + '\n\nThe floor stays so you can import a new plan later.';
-                        if (window.confirm(msg)) void guard(repo.removeFloorPlan(f.id).then(() => toast('ok', `Plan removed from ${f.name}`)));
-                      }}>Remove plan</button>
-                  )}
                   <button disabled={readOnly} aria-label={`Rename ${f.name}`} onClick={() => { setEditing(f.id); setName(f.name); }}>Rename</button>
                   <button disabled={readOnly || i === 0} aria-label={`Move ${f.name} up`} onClick={() => guard(repo.moveFloor(f.id, -1))}>↑</button>
                   <button disabled={readOnly || i === floors.length - 1} aria-label={`Move ${f.name} down`} onClick={() => guard(repo.moveFloor(f.id, 1))}>↓</button>
-                  {floors.length > 1 && (
-                    <button className="danger" disabled={readOnly} aria-label={`Remove ${f.name}`}
-                      onClick={() => {
-                        const n = counts[f.id] ?? 0;
-                        const msg = n
-                          ? `Are you sure you want to delete "${f.name}"?\n\nAll ${n} finding${n === 1 ? '' : 's'} on this floor, with their photos${f.planAssetId ? ' and the floor plan' : ''}, will be deleted with it. This cannot be undone.`
-                          : `Remove "${f.name}"${f.planAssetId ? ' and its plan' : ''}?`;
-                        if (window.confirm(msg)) void guard(repo.deleteFloor(f.id).then(() => toast('ok', `${f.name} removed`)));
-                      }}>Remove</button>
-                  )}
+                  <RemoveStep floor={f} findings={counts[f.id] ?? 0} isLast={floors.length === 1} readOnly={readOnly} guard={guard} />
                 </>
               )}
             </div>

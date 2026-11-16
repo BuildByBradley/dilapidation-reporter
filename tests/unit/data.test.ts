@@ -152,6 +152,17 @@ describe('plan replacement (A18, A03)', () => {
     await repo.setFloorPlan(floors[0].id, img('newer.png'), 'remove');
     expect(await db.findings.get(f.id)).toBeUndefined();
   });
+  it('removeFloorFindings deletes only that floor\'s pins and photos; plan and floor stay', async () => {
+    const { floors, cats } = await seeded();
+    const f = await repo.createFinding({ floorId: floors[0].id, u: 0.3, v: 0.3, categoryId: cats[0].id, title: 't' });
+    await repo.addPhoto(f.id, photo());
+    const other = await repo.createFinding({ floorId: floors[1].id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: 'o' });
+    expect(await repo.removeFloorFindings(floors[0].id)).toBe(1);
+    expect(await db.findings.get(f.id)).toBeUndefined();
+    expect(await db.photos.where('findingId').equals(f.id).count()).toBe(0);
+    expect((await db.floors.get(floors[0].id))!.planAssetId).toBeDefined();
+    expect(await db.findings.get(other.id)).toBeDefined();
+  });
   it('removeFloorPlan clears the plan, its findings and blobs but keeps the floor', async () => {
     const { p, floors, cats } = await seeded();
     const f = await repo.createFinding({ floorId: floors[0].id, u: 0.3, v: 0.3, categoryId: cats[0].id, title: 't' });

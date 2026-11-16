@@ -278,6 +278,17 @@ export async function setFloorPlan(floorId: string, img: ProcessedImage, mode: R
     return asset;
   }));
 }
+/** Delete every finding (pin) on a floor, with their photos. The floor and its plan stay. Returns how many went. */
+export async function removeFloorFindings(floorId: string): Promise<number> {
+  return tracked(() => db.transaction('rw', [db.projects, db.floors, db.findings, db.photos, db.assets, db.blobs], async () => {
+    const floor = await db.floors.get(floorId);
+    if (!floor) throw new RepoError('Floor not found');
+    const fs = await db.findings.where('floorId').equals(floorId).toArray();
+    for (const f of fs) await deleteFindingInTx(f.id);
+    if (fs.length) await touch(floor.projectId);
+    return fs.length;
+  }));
+}
 /**
  * Take the plan off a floor, keeping the floor itself (name, prefix, order) so a plan can be imported again later.
  * Pins have nothing to sit on without a plan, so the floor's findings and their photos are deleted with it.
