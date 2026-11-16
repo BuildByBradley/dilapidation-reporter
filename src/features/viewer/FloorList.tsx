@@ -36,6 +36,14 @@ export function FloorList({ floors, counts, mode, readOnly, onSelect, onImport, 
               ) : (
                 <>
                   <button disabled={readOnly} onClick={() => onImport(f.id)}>{f.planAssetId ? 'Replace' : 'Import'}</button>
+                  {f.planAssetId && (
+                    <button className="danger" disabled={readOnly} aria-label={`Remove plan from ${f.name}`}
+                      onClick={() => {
+                        const n = counts[f.id] ?? 0;
+                        const msg = `Remove the plan from "${f.name}"?` + (n ? `\n\nThis also deletes its ${n} finding${n === 1 ? '' : 's'} and their photos.` : '') + '\n\nThe floor stays so you can import a new plan later.';
+                        if (window.confirm(msg)) void guard(repo.removeFloorPlan(f.id).then(() => toast('ok', `Plan removed from ${f.name}`)));
+                      }}>Remove plan</button>
+                  )}
                   <button disabled={readOnly} aria-label={`Rename ${f.name}`} onClick={() => { setEditing(f.id); setName(f.name); }}>Rename</button>
                   <button disabled={readOnly || i === 0} aria-label={`Move ${f.name} up`} onClick={() => guard(repo.moveFloor(f.id, -1))}>↑</button>
                   <button disabled={readOnly || i === floors.length - 1} aria-label={`Move ${f.name} down`} onClick={() => guard(repo.moveFloor(f.id, 1))}>↓</button>

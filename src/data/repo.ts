@@ -277,6 +277,22 @@ export async function setFloorPlan(floorId: string, img: ProcessedImage, mode: R
     return asset;
   }));
 }
+/**
+ * Take the plan off a floor, keeping the floor itself (name, prefix, order) so a plan can be imported again later.
+ * Pins have nothing to sit on without a plan, so the floor's findings and their photos are deleted with it.
+ */
+export async function removeFloorPlan(floorId: string): Promise<void> {
+  return tracked(() => db.transaction('rw', [db.projects, db.floors, db.findings, db.photos, db.assets, db.blobs], async () => {
+    const floor = await db.floors.get(floorId);
+    if (!floor) throw new RepoError('Floor not found');
+    if (!floor.planAssetId) return;
+    const fs = await db.findings.where('floorId').equals(floorId).toArray();
+    for (const f of fs) await deleteFindingInTx(f.id);
+    await db.floors.update(floorId, { planAssetId: undefined, sourcePage: undefined, updatedAt: nowIso() });
+    await removeAsset(floor.planAssetId);
+    await touch(floor.projectId);
+  }));
+}
 async function removeAsset(assetId: string) {
   const a = await db.assets.get(assetId);
   if (!a) return;

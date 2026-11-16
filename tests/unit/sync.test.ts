@@ -212,6 +212,26 @@ describe('phone → PC live sync', () => {
     phone.engine.stop(); pc.engine.stop();
   });
 
+  it('a plan removed on one device is removed on the other, findings and all', async () => {
+    const phone = device('phone'), pc = device('pc');
+    const { floor, f } = await on(phone.db, async () => {
+      const p = await repo.createProject({ name: 'Plans' });
+      const [floor] = await repo.listFloors(p.id);
+      await repo.setFloorPlan(floor.id, img(8));
+      const cats = await repo.listCategories(p.id);
+      const f = await repo.createFinding({ floorId: floor.id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: 'Crack' });
+      return { floor, f };
+    });
+    await phone.engine.start(); await pc.engine.start(); await settle(phone.engine, pc.engine);
+    expect((await pc.db.floors.get(floor.id))?.planAssetId).toBeDefined();
+    await on(pc.db, () => repo.removeFloorPlan(floor.id));
+    await settle(pc.engine, phone.engine);
+    expect(await phone.db.floors.get(floor.id)).toBeDefined();
+    expect((await phone.db.floors.get(floor.id))?.planAssetId).toBeUndefined();
+    expect(await phone.db.findings.get(f.id)).toBeUndefined();
+    phone.engine.stop(); pc.engine.stop();
+  });
+
   it('leaving a shared project removes it from this device without deleting it for others', async () => {
     const owner = device('owner'), member = device('member');
     const p = await on(owner.db, () => repo.createProject({ name: 'Shared block' }));

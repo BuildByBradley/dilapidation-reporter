@@ -152,6 +152,26 @@ describe('plan replacement (A18, A03)', () => {
     await repo.setFloorPlan(floors[0].id, img('newer.png'), 'remove');
     expect(await db.findings.get(f.id)).toBeUndefined();
   });
+  it('removeFloorPlan clears the plan, its findings and blobs but keeps the floor', async () => {
+    const { p, floors, cats } = await seeded();
+    const f = await repo.createFinding({ floorId: floors[0].id, u: 0.3, v: 0.3, categoryId: cats[0].id, title: 't' });
+    await repo.addPhoto(f.id, photo());
+    const other = await repo.createFinding({ floorId: floors[1].id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: 'o' });
+    const assetId = (await db.floors.get(floors[0].id))!.planAssetId!;
+    const blobsBefore = await db.blobs.count();
+    await repo.removeFloorPlan(floors[0].id);
+    const floor = await db.floors.get(floors[0].id);
+    expect(floor).toBeDefined();
+    expect(floor!.planAssetId).toBeUndefined();
+    expect(await db.assets.get(assetId)).toBeUndefined();
+    expect(await db.findings.get(f.id)).toBeUndefined();
+    expect(await db.photos.where('findingId').equals(f.id).count()).toBe(0);
+    expect(await db.blobs.count()).toBe(blobsBefore - 4 - 3); // plan (4 blobs) + photo (3 blobs)
+    expect(await db.findings.get(other.id)).toBeDefined();
+    expect(await repo.listFloors(p.id)).toHaveLength(5);
+    await repo.setFloorPlan(floors[0].id, img('again.png'));
+    expect((await db.floors.get(floors[0].id))!.planAssetId).toBeDefined();
+  });
   it('failed replacement leaves previous plan and findings intact', async () => {
     const { floors, cats } = await seeded();
     const f = await repo.createFinding({ floorId: floors[0].id, u: 0.3, v: 0.3, categoryId: cats[0].id, title: 't' });
