@@ -212,12 +212,13 @@ export async function addFloor(projectId: string): Promise<Floor> {
     return floor;
   }));
 }
-/** Remove a floor that has no findings (its plan, if any, goes with it). */
+/** Remove a floor along with its plan and every finding (and photo) on it. */
 export async function deleteFloor(id: string): Promise<void> {
   return tracked(() => db.transaction('rw', [db.floors, db.findings, db.photos, db.assets, db.blobs, db.projects], async () => {
     const f = await db.floors.get(id);
     if (!f) return;
-    if (await db.findings.where('floorId').equals(id).count()) throw new RepoError('This floor has findings. Delete or move them first.');
+    const fs = await db.findings.where('floorId').equals(id).toArray();
+    for (const x of fs) await deleteFindingInTx(x.id);
     await db.floors.delete(id);
     if (f.planAssetId) await removeAsset(f.planAssetId);
     await touch(f.projectId);

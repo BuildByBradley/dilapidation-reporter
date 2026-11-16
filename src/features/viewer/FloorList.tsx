@@ -47,9 +47,15 @@ export function FloorList({ floors, counts, mode, readOnly, onSelect, onImport, 
                   <button disabled={readOnly} aria-label={`Rename ${f.name}`} onClick={() => { setEditing(f.id); setName(f.name); }}>Rename</button>
                   <button disabled={readOnly || i === 0} aria-label={`Move ${f.name} up`} onClick={() => guard(repo.moveFloor(f.id, -1))}>↑</button>
                   <button disabled={readOnly || i === floors.length - 1} aria-label={`Move ${f.name} down`} onClick={() => guard(repo.moveFloor(f.id, 1))}>↓</button>
-                  {!(counts[f.id] ?? 0) && floors.length > 1 && (
+                  {floors.length > 1 && (
                     <button className="danger" disabled={readOnly} aria-label={`Remove ${f.name}`}
-                      onClick={() => { if (window.confirm(`Remove "${f.name}"${f.planAssetId ? ' and its plan' : ''}?`)) void guard(repo.deleteFloor(f.id)); }}>Remove</button>
+                      onClick={() => {
+                        const n = counts[f.id] ?? 0;
+                        const msg = n
+                          ? `Are you sure you want to delete "${f.name}"?\n\nAll ${n} finding${n === 1 ? '' : 's'} on this floor, with their photos${f.planAssetId ? ' and the floor plan' : ''}, will be deleted with it. This cannot be undone.`
+                          : `Remove "${f.name}"${f.planAssetId ? ' and its plan' : ''}?`;
+                        if (window.confirm(msg)) void guard(repo.deleteFloor(f.id).then(() => toast('ok', `${f.name} removed`)));
+                      }}>Remove</button>
                   )}
                 </>
               )}

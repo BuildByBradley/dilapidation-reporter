@@ -10,8 +10,16 @@ test('add a floor and remove an empty one', async ({ page }) => {
   page.once('dialog', (d) => void d.accept());
   await page.getByRole('button', { name: 'Remove Level 5' }).click();
   await expect(page.getByTestId('floor-slot')).toHaveCount(5);
-  // floors with findings cannot be removed
-  await expect(page.getByRole('button', { name: 'Remove Ground' })).toHaveCount(0);
+  // a floor with findings can be removed too, after a warning that names how many go with it
+  const before = (await dbAll(page, 'findings')).length;
+  const onGround = await page.getByTestId('floor-slot').first().getByText(/\d+ findings?/).textContent();
+  const n = Number(/\d+/.exec(onGround ?? '')![0]);
+  expect(n).toBeGreaterThan(0);
+  page.once('dialog', (d) => { expect(d.message()).toContain('Are you sure'); expect(d.message()).toContain(`All ${n} finding`); void d.accept(); });
+  await page.getByRole('button', { name: 'Remove Ground' }).click();
+  await expect(page.getByTestId('floor-slot')).toHaveCount(4);
+  await expect(page.getByTestId('floor-slot').first()).not.toContainText('Ground');
+  await expect.poll(async () => (await dbAll(page, 'findings')).length).toBe(before - n);
 });
 
 test('remove a plan from a floor; the floor stays and can take a new plan', async ({ page }) => {
