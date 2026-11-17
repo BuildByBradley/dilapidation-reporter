@@ -322,7 +322,103 @@ export async function countFloorFindings(floorId: string) {
 export type NewFinding = {
   floorId: string; u: number; v: number; categoryId: string; title: string;
   severity?: Severity; description?: string; locationNotes?: string;
+  /** Link the title / description to wording already used in the project (see {@link WordingChoice}). */
+  titleLink?: WordingChoice; descriptionLink?: WordingChoice;
 };
+
+// ---------- linked wording (titles and descriptions) ----------
+/** Fields whose wording can be reused and linked, like a SketchUp component. */
+export type WordingField = 'title' | 'description';
+const LINK_KEY = { title: 'titleLinkId', description: 'descriptionLinkId' } as const;
+const linkOf = (f: Finding, field: WordingField) => f[LINK_KEY[field]];
+
+/**
+ * A wording already used in the project, offered as a suggestion: either a linked group (findings sharing a
+ * link id) or the unlinked findings that happen to have exactly this text.
+ */
+export type WordingChoice = { text: string; linkId?: string };
+export type WordingSuggestion = WordingChoice & { count: number; references: string[] };
+
+/** Every distinct wording of a field in a set of findings, most used first. */
+export function wordingSuggestions(findings: Finding[], field: WordingField): WordingSuggestion[] {
+  const groups = new Map<string, WordingSuggestion>();
+  for (const f of findings) {
+    const text = f[field];
+    if (!text.trim()) continue;
+    const linkId = linkOf(f, field);
+    const key = linkId ? `link:${linkId}` : `text:${text}`;
+    const g = groups.get(key) ?? { text, linkId, count: 0, references: [] };
+    g.count++; g.references.push(f.reference);
+    groups.set(key, g);
+  }
+  return [...groups.values()].sort((a, b) => b.count - a.count || a.text.localeCompare(b.text));
+}
+
+/** Suggestions matching what has been typed: every typed word must appear; wording that starts with it ranks first. */
+export function matchWording(all: WordingSuggestion[], typed: string, limit = 6): WordingSuggestion[] {
+  const q = typed.trim().toLowerCase();
+  if (q.length < 2) return [];
+  const words = q.split(/\s+/);
+  return all
+    .filter((s) => s.text.trim().toLowerCase() !== q && words.every((w) => s.text.toLowerCase().includes(w)))
+    .map((s) => ({ s, starts: s.text.toLowerCase().startsWith(q) ? 0 : 1 }))
+    .sort((a, b) => a.starts - b.starts)
+    .slice(0, limit).map((x) => x.s);
+}
+
+const inProject = (projectId: string) => db.findings.where('projectId').equals(projectId);
+
+/**
+ * Resolve a choice to a link id inside a transaction, linking the unlinked findings that share its text.
+ * Undefined when no other finding uses the wording any more (nothing to link to).
+ */
+async function resolveLink(projectId: string, field: WordingField, choice: WordingChoice, exceptId?: string): Promise<string | undefined> {
+  if (choice.linkId && await inProject(projectId).filter((f) => f.id !== exceptId && linkOf(f, field) === choice.linkId).count()) return choice.linkId;
+  const same = inProject(projectId).filter((f) => f.id !== exceptId && !linkOf(f, field) && f[field] === choice.text);
+  if (!(await same.count())) return undefined;
+  const linkId = uuid();
+  await same.modify({ [LINK_KEY[field]]: linkId, updatedAt: nowIso() });
+  return linkId;
+}
+/** The current wording of a link group (it may have been edited since a suggestion was shown). */
+async function groupText(projectId: string, field: WordingField, linkId: string | undefined, exceptId?: string) {
+  if (!linkId) return undefined;
+  return (await inProject(projectId).filter((x) => x.id !== exceptId && linkOf(x, field) === linkId).first())?.[field];
+}
+
+/** Give a finding a title or description already used in the project, linked to the findings that use it. */
+export async function linkWording(findingId: string, field: WordingField, choice: WordingChoice): Promise<void> {
+  return tracked(() => db.transaction('rw', [db.findings, db.projects], async () => {
+    const f = await db.findings.get(findingId);
+    if (!f) throw new RepoError('Finding not found');
+    const old = linkOf(f, field);
+    await db.findings.update(findingId, { [LINK_KEY[field]]: undefined });
+    const linkId = await resolveLink(f.projectId, field, choice, findingId);
+    const text = (await groupText(f.projectId, field, linkId, findingId)) ?? choice.text;
+    await db.findings.update(findingId, { [LINK_KEY[field]]: linkId, [field]: text, updatedAt: nowIso() });
+    if (old) await dissolveIfAlone(f.projectId, field, old);
+    await touch(f.projectId);
+  }));
+}
+
+/** "Make unique": this finding keeps its current wording but stops sharing it. */
+export async function unlinkWording(findingId: string, field: WordingField): Promise<void> {
+  return tracked(() => db.transaction('rw', [db.findings, db.projects], async () => {
+    const f = await db.findings.get(findingId);
+    const old = f && linkOf(f, field);
+    if (!f || !old) return;
+    await db.findings.update(findingId, { [LINK_KEY[field]]: undefined, updatedAt: nowIso() });
+    await dissolveIfAlone(f.projectId, field, old);
+    await touch(f.projectId);
+  }));
+}
+
+/** A link with a single member links nothing: drop it. */
+async function dissolveIfAlone(projectId: string, field: WordingField, linkId: string) {
+  const left = await inProject(projectId).filter((x) => linkOf(x, field) === linkId).toArray();
+  if (left.length === 1) await db.findings.update(left[0].id, { [LINK_KEY[field]]: undefined });
+}
+
 export async function createFinding(input: NewFinding): Promise<Finding> {
   return tracked(() => db.transaction('rw', [db.projects, db.floors, db.findings, db.categories], async () => {
     if (!isValidUv(input.u, input.v)) throw new RepoError('Pin location is outside the floor plan');
@@ -345,6 +441,12 @@ export async function createFinding(input: NewFinding): Promise<Finding> {
       u: input.u, v: input.v, categoryId: cat.id, severity: input.severity ?? 'not_assessed', title: input.title.trim(),
       description: input.description ?? '', locationNotes: input.locationNotes ?? '', locationNeedsReview: false, createdAt: t, updatedAt: t,
     };
+    for (const [field, choice] of [['title', input.titleLink], ['description', input.descriptionLink]] as const) {
+      if (!choice) continue;
+      const linkId = await resolveLink(project.id, field, choice);
+      if (linkId) finding[LINK_KEY[field]] = linkId;
+      finding[field] = (await groupText(project.id, field, linkId)) ?? choice.text;
+    }
     await db.findings.add(finding);
     await db.floors.update(floor.id, { nextFindingNumber: number + 1, numberedAs: code });
     await db.projects.update(project.id, { updatedAt: t });
@@ -361,7 +463,14 @@ export async function updateFinding(id: string, patch: FindingPatch): Promise<vo
       const c = await db.categories.get(patch.categoryId);
       if (!c || c.archived) throw new RepoError('That category is not available');
     }
-    await db.findings.update(id, { ...patch, updatedAt: nowIso() });
+    const t = nowIso();
+    await db.findings.update(id, { ...patch, updatedAt: t });
+    // linked wording: a new title / description goes to every finding that shares it
+    for (const field of ['title', 'description'] as const) {
+      const linkId = linkOf(f, field), text = patch[field];
+      if (text === undefined || !linkId) continue;
+      await inProject(f.projectId).filter((x) => x.id !== id && linkOf(x, field) === linkId).modify({ [field]: text, updatedAt: t });
+    }
     await touch(f.projectId);
   }));
 }
@@ -384,6 +493,7 @@ async function deleteFindingInTx(id: string) {
   await db.photos.bulkDelete(photos.map((p) => p.id));
   for (const p of photos) await removeAsset(p.assetId);
   await db.findings.delete(id);
+  for (const field of ['title', 'description'] as const) { const l = linkOf(f, field); if (l) await dissolveIfAlone(f.projectId, field, l); }
 }
 export async function deleteFinding(id: string): Promise<void> {
   return tracked(() => db.transaction('rw', [db.findings, db.photos, db.assets, db.blobs, db.floors, db.projects], async () => {
@@ -407,7 +517,9 @@ export async function copyFindingToFloors(findingId: string, floorIds: string[])
       const floor = await db.floors.get(floorId);
       if (!floor || floor.projectId !== src.projectId) throw new RepoError('Floor not found');
       const copy = await createFinding({ floorId, u: src.u, v: src.v, categoryId: src.categoryId, title: src.title, severity: src.severity,
-        description: src.description, locationNotes: src.locationNotes });
+        description: src.description, locationNotes: src.locationNotes,
+        titleLink: src.titleLinkId ? { text: src.title, linkId: src.titleLinkId } : undefined,
+        descriptionLink: src.descriptionLinkId ? { text: src.description, linkId: src.descriptionLinkId } : undefined });
       const t = nowIso();
       await db.photos.bulkAdd(photos.map((p) => ({ ...p, id: uuid(), findingId: copy.id, createdAt: t })));
       out.push(copy);

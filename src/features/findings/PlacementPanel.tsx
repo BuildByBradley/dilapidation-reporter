@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState, type Ref } from 'react';
 import { useObjectUrl, useToast } from '../../components/ui';
-import type { ProcessedImage } from '../../data/repo';
+import type { WordingChoice, ProcessedImage } from '../../data/repo';
+import { WordingField } from './WordingField';
 import { ImportError, cropPhoto, processPhoto, rotatePhoto } from '../../lib/imaging';
 import { PhotoCrop } from '../photos/PhotoCrop';
 import { NEW_CATEGORY, promptNewCategory } from '../categories/newCategory';
-import { SEVERITIES, type Category, type Severity } from '../../lib/types';
+import { SEVERITIES, type Category, type Finding, type Severity } from '../../lib/types';
 import { CameraDialog } from '../photos/PhotoSection';
 import { PhotoMarkup } from '../photos/PhotoMarkup';
 import { Dialog } from '../../components/ui';
 
-export type NewFindingForm = { title: string; categoryId: string; severity: Severity; description: string; locationNotes: string };
+export type NewFindingForm = { title: string; categoryId: string; severity: Severity; description: string; locationNotes: string; titleLink?: WordingChoice; descriptionLink?: WordingChoice };
 export const emptyForm = (categoryId = ''): NewFindingForm => ({ title: '', categoryId, severity: 'not_assessed', description: '', locationNotes: '' });
 
 /**
@@ -20,7 +21,7 @@ export const emptyForm = (categoryId = ''): NewFindingForm => ({ title: '', cate
  * On a phone it fills the screen (`compact`); "Show plan" collapses it so the plan can be tapped again.
  */
 export function PlacementPanel({ mode, reference, floorName, u, v, assetWidth, assetHeight, categories, form, setForm, onNudge, onConfirm, onCancel, busy,
-  compact = false, magnifierRef, onShowPlan, pendingPhotos, setPendingPhotos, magCrop = 120, setMagCrop }: {
+  compact = false, magnifierRef, onShowPlan, pendingPhotos, setPendingPhotos, magCrop = 120, setMagCrop, findings = [] }: {
   mode: 'new' | 'relocate'; reference?: string; floorName: string; u: number; v: number; assetWidth: number; assetHeight: number;
   categories: Category[]; form: NewFindingForm; setForm(f: NewFindingForm): void;
   onNudge(dxPx: number, dyPx: number): void; onConfirm(): void; onCancel(): void; busy: boolean;
@@ -28,6 +29,8 @@ export function PlacementPanel({ mode, reference, floorName, u, v, assetWidth, a
   /** Magnifier crop in plan pixels (smaller = closer) and its setter. */
   magCrop?: number; setMagCrop?(n: number): void;
   pendingPhotos: ProcessedImage[]; setPendingPhotos(p: ProcessedImage[]): void;
+  /** The project's findings, for description suggestions. */
+  findings?: Finding[];
 }) {
   const toast = useToast();
   const [big, setBig] = useState(false);
@@ -85,7 +88,10 @@ export function PlacementPanel({ mode, reference, floorName, u, v, assetWidth, a
         <>
           <div className="place-step" aria-label="Details">
             <h3>{stepNo(2)}Details</h3>
-            <label>Title *<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus={!compact} enterKeyHint="done" /></label>
+            <WordingField field="title" label="Title *" value={form.title} findings={findings} unsaved autoFocus={!compact} link={form.titleLink}
+              onType={(t) => setForm({ ...form, title: t, titleLink: undefined })}
+              onPick={(c) => setForm({ ...form, title: c.text, titleLink: c })}
+              onUnlink={() => setForm({ ...form, titleLink: undefined })} />
             <div className="two">
               <label>Category *<select value={form.categoryId} onChange={async (e) => {
                 if (e.target.value !== NEW_CATEGORY) { setForm({ ...form, categoryId: e.target.value }); return; }
@@ -100,7 +106,11 @@ export function PlacementPanel({ mode, reference, floorName, u, v, assetWidth, a
                 {SEVERITIES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
               </select></label>
             </div>
-            <label>Description<textarea rows={compact ? 2 : 3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+            <WordingField field="description" label="Description" rows={compact ? 2 : 3} value={form.description} findings={findings} unsaved
+              link={form.descriptionLink}
+              onType={(t) => setForm({ ...form, description: t, descriptionLink: undefined })}
+              onPick={(c) => setForm({ ...form, description: c.text, descriptionLink: c })}
+              onUnlink={() => setForm({ ...form, descriptionLink: undefined })} />
             <label>Location notes<textarea rows={2} value={form.locationNotes} onChange={(e) => setForm({ ...form, locationNotes: e.target.value })} /></label>
           </div>
           <PendingPhotos photos={pendingPhotos} setPhotos={setPendingPhotos} stepNo={stepNo(3)} />

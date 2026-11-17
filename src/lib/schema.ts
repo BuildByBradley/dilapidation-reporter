@@ -20,7 +20,7 @@ export const manifestSchema = z.object({
   findings: z.array(z.object({
     id: str, projectId: str, floorId: str, reference: str, u: uv, v: uv, categoryId: str,
     severity: z.enum(['not_assessed', 'minor', 'moderate', 'major']), title: str, description: str, locationNotes: str,
-    locationNeedsReview: z.boolean(), createdAt: str, updatedAt: str,
+    locationNeedsReview: z.boolean(), createdAt: str, updatedAt: str, descriptionLinkId: str.optional(), titleLinkId: str.optional(),
   })),
   photos: z.array(z.object({
     id: str, findingId: str, projectId: str, assetId: str, caption: str, order: z.number().int(), isCover: z.boolean(), createdAt: str,
