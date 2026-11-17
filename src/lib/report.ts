@@ -23,7 +23,8 @@ export type ReportModel = {
 /** Derives the report entirely from stored data — independent of workspace filters and camera. */
 export function buildReportModel(b: ProjectBundle): ReportModel {
   const cats = new Map(b.categories.map((c) => [c.id, c]));
-  const floors = [...b.floors].sort((a, c) => a.order - c.order);
+  // Floors ticked out of the report leave no trace in it: no plan page, findings, counts or CSV rows.
+  const floors = b.floors.filter((f) => !f.excludeFromReport).sort((a, c) => a.order - c.order);
   const outFloors: ReportFloor[] = floors.map((f) => {
     const findings = b.findings.filter((x) => x.floorId === f.id).sort((x, y) => referenceNumber(x.reference) - referenceNumber(y.reference) || x.reference.localeCompare(y.reference, undefined, { numeric: true }))
       .map((x): ReportFinding => ({

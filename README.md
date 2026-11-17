@@ -47,7 +47,7 @@ The long-report print test additionally needs poppler (`pdftotext`, `pdfinfo`, `
    6 photos). Sample findings are never mixed into real projects. You can also rename, duplicate, back up, restore and delete.
 2. **Import plans** — each floor slot has *Import / Replace*. Choose several files at once; each is assigned to a slot.
    For a PDF, pick the page from thumbnails; **use another page of the same PDF** to feed a different floor.
-   Replacing a plan that has findings forces an explicit choice: *keep pin positions for manual review* (pins are flagged
+   Each floor has one remove button that works in steps, each confirmed: *Remove pins* (deletes its findings), then *Remove plan*, then *Remove floor*. Untick *Include in report* on a floor to leave it, and all its findings, out of the report, summary and CSV (the floor and its findings stay in the project). Replacing a plan that has findings forces an explicit choice: *keep pin positions for manual review* (pins are flagged
    until you relocate or mark them reviewed) or *remove that floor’s findings*. A failed import changes nothing.
 3. **Navigate** — overview shows the stack. Tap a floor (or its list entry) to isolate it: every other floor fades out
    completely and is removed from rendering and hit-testing. Return with **Return to building**. **2D view** shows the same

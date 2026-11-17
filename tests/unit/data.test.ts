@@ -152,6 +152,51 @@ describe('plan replacement (A18, A03)', () => {
     await repo.setFloorPlan(floors[0].id, img('newer.png'), 'remove');
     expect(await db.findings.get(f.id)).toBeUndefined();
   });
+  it('removeFloorFindings deletes only that floor\'s pins and photos; plan and floor stay', async () => {
+    const { floors, cats } = await seeded();
+    const f = await repo.createFinding({ floorId: floors[0].id, u: 0.3, v: 0.3, categoryId: cats[0].id, title: 't' });
+    await repo.addPhoto(f.id, photo());
+    const other = await repo.createFinding({ floorId: floors[1].id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: 'o' });
+    expect(await repo.removeFloorFindings(floors[0].id)).toBe(1);
+    expect(await db.findings.get(f.id)).toBeUndefined();
+    expect(await db.photos.where('findingId').equals(f.id).count()).toBe(0);
+    expect((await db.floors.get(floors[0].id))!.planAssetId).toBeDefined();
+    expect(await db.findings.get(other.id)).toBeDefined();
+  });
+  it('removeFloorPlan clears the plan, its findings and blobs but keeps the floor', async () => {
+    const { p, floors, cats } = await seeded();
+    const f = await repo.createFinding({ floorId: floors[0].id, u: 0.3, v: 0.3, categoryId: cats[0].id, title: 't' });
+    await repo.addPhoto(f.id, photo());
+    const other = await repo.createFinding({ floorId: floors[1].id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: 'o' });
+    const assetId = (await db.floors.get(floors[0].id))!.planAssetId!;
+    const blobsBefore = await db.blobs.count();
+    await repo.removeFloorPlan(floors[0].id);
+    const floor = await db.floors.get(floors[0].id);
+    expect(floor).toBeDefined();
+    expect(floor!.planAssetId).toBeUndefined();
+    expect(await db.assets.get(assetId)).toBeUndefined();
+    expect(await db.findings.get(f.id)).toBeUndefined();
+    expect(await db.photos.where('findingId').equals(f.id).count()).toBe(0);
+    expect(await db.blobs.count()).toBe(blobsBefore - 4 - 3); // plan (4 blobs) + photo (3 blobs)
+    expect(await db.findings.get(other.id)).toBeDefined();
+    expect(await repo.listFloors(p.id)).toHaveLength(5);
+    await repo.setFloorPlan(floors[0].id, img('again.png'));
+    expect((await db.floors.get(floors[0].id))!.planAssetId).toBeDefined();
+  });
+  it('deleteFloor removes a floor with findings, their photos and its plan; other floors untouched', async () => {
+    const { p, floors, cats } = await seeded();
+    const f = await repo.createFinding({ floorId: floors[0].id, u: 0.3, v: 0.3, categoryId: cats[0].id, title: 't' });
+    await repo.addPhoto(f.id, photo());
+    const other = await repo.createFinding({ floorId: floors[1].id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: 'o' });
+    const blobsBefore = await db.blobs.count();
+    await repo.deleteFloor(floors[0].id);
+    expect(await db.floors.get(floors[0].id)).toBeUndefined();
+    expect(await db.findings.get(f.id)).toBeUndefined();
+    expect(await db.photos.where('findingId').equals(f.id).count()).toBe(0);
+    expect(await db.blobs.count()).toBe(blobsBefore - 4 - 3);
+    expect(await db.findings.get(other.id)).toBeDefined();
+    expect(await repo.listFloors(p.id)).toHaveLength(4);
+  });
   it('failed replacement leaves previous plan and findings intact', async () => {
     const { floors, cats } = await seeded();
     const f = await repo.createFinding({ floorId: floors[0].id, u: 0.3, v: 0.3, categoryId: cats[0].id, title: 't' });
@@ -242,6 +287,26 @@ describe('duplicate, backup and restore (A16, A17, A22)', () => {
     await repo.deleteProject(copy.id);
     expect(await db.findings.get(f.id)).toBeDefined();
     expect((await repo.loadBundle(p.id)).blobs.size).toBeGreaterThan(0);
+  });
+  it('a floor left out of the report drops out of the model and CSV, and survives duplicate and backup', async () => {
+    const { p, floors, cats } = await seeded();
+    await repo.createFinding({ floorId: floors[0].id, u: 0.3, v: 0.3, categoryId: cats[0].id, title: 'kept' });
+    await repo.createFinding({ floorId: floors[1].id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: 'left out' });
+    await repo.updateFloor(floors[1].id, { excludeFromReport: true });
+    const m = buildReportModel(await repo.loadBundle(p.id));
+    expect(m.floors.map((f) => f.name)).toEqual(['Ground', 'Level 2', 'Level 3', 'Level 4']);
+    expect(m.total).toBe(1);
+    expect(m.byFloor.map((x) => x.floor)).not.toContain('Level 1');
+    const csv = buildCsv(m);
+    expect(csv).toContain('kept'); expect(csv).not.toContain('left out');
+    // the floor and its findings are still in the project itself
+    expect(await db.findings.where('floorId').equals(floors[1].id).count()).toBe(1);
+    const copy = await repo.duplicateProject(p.id);
+    expect((await repo.listFloors(copy.id))[1].excludeFromReport).toBe(true);
+    const restored = await repo.saveBundleAsNew(parseBackup(await createBackup(await repo.loadBundle(p.id))));
+    expect((await repo.listFloors(restored.id))[1].excludeFromReport).toBe(true);
+    await repo.updateFloor(floors[1].id, { excludeFromReport: false });
+    expect(buildReportModel(await repo.loadBundle(p.id)).total).toBe(2);
   });
   it('round-trips through a zip backup into a new project', async () => {
     const { p } = await withData();

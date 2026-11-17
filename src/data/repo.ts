@@ -186,7 +186,7 @@ export function floorCodes(floors: Floor[]): Map<string, string> {
   return out;
 }
 
-export async function updateFloor(id: string, patch: Partial<Pick<Floor, 'name' | 'displayWidth' | 'code'>>): Promise<void> {
+export async function updateFloor(id: string, patch: Partial<Pick<Floor, 'name' | 'displayWidth' | 'code' | 'excludeFromReport'>>): Promise<void> {
   if (patch.code !== undefined) patch = { ...patch, code: cleanFloorCode(patch.code) };
   return tracked(async () => {
     const f = await db.floors.get(id);
@@ -212,12 +212,13 @@ export async function addFloor(projectId: string): Promise<Floor> {
     return floor;
   }));
 }
-/** Remove a floor that has no findings (its plan, if any, goes with it). */
+/** Remove a floor along with its plan and every finding (and photo) on it. */
 export async function deleteFloor(id: string): Promise<void> {
   return tracked(() => db.transaction('rw', [db.floors, db.findings, db.photos, db.assets, db.blobs, db.projects], async () => {
     const f = await db.floors.get(id);
     if (!f) return;
-    if (await db.findings.where('floorId').equals(id).count()) throw new RepoError('This floor has findings. Delete or move them first.');
+    const fs = await db.findings.where('floorId').equals(id).toArray();
+    for (const x of fs) await deleteFindingInTx(x.id);
     await db.floors.delete(id);
     if (f.planAssetId) await removeAsset(f.planAssetId);
     await touch(f.projectId);
@@ -275,6 +276,33 @@ export async function setFloorPlan(floorId: string, img: ProcessedImage, mode: R
     }
     await touch(floor.projectId);
     return asset;
+  }));
+}
+/** Delete every finding (pin) on a floor, with their photos. The floor and its plan stay. Returns how many went. */
+export async function removeFloorFindings(floorId: string): Promise<number> {
+  return tracked(() => db.transaction('rw', [db.projects, db.floors, db.findings, db.photos, db.assets, db.blobs], async () => {
+    const floor = await db.floors.get(floorId);
+    if (!floor) throw new RepoError('Floor not found');
+    const fs = await db.findings.where('floorId').equals(floorId).toArray();
+    for (const f of fs) await deleteFindingInTx(f.id);
+    if (fs.length) await touch(floor.projectId);
+    return fs.length;
+  }));
+}
+/**
+ * Take the plan off a floor, keeping the floor itself (name, prefix, order) so a plan can be imported again later.
+ * Pins have nothing to sit on without a plan, so the floor's findings and their photos are deleted with it.
+ */
+export async function removeFloorPlan(floorId: string): Promise<void> {
+  return tracked(() => db.transaction('rw', [db.projects, db.floors, db.findings, db.photos, db.assets, db.blobs], async () => {
+    const floor = await db.floors.get(floorId);
+    if (!floor) throw new RepoError('Floor not found');
+    if (!floor.planAssetId) return;
+    const fs = await db.findings.where('floorId').equals(floorId).toArray();
+    for (const f of fs) await deleteFindingInTx(f.id);
+    await db.floors.update(floorId, { planAssetId: undefined, sourcePage: undefined, updatedAt: nowIso() });
+    await removeAsset(floor.planAssetId);
+    await touch(floor.projectId);
   }));
 }
 async function removeAsset(assetId: string) {

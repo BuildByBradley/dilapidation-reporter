@@ -72,6 +72,7 @@ input[type='color'] { width: 48px; padding: 2px; }
 .floor-thumb { width: 48px; height: 36px; object-fit: contain; background: #eef1f5; border: 1px solid var(--line); border-radius: 4px; flex: none; display: grid; place-items: center; color: var(--muted); }
 .floor-text { display: grid; } .floor-name { font-weight: 600; }
 .floor-actions { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; } .floor-actions button { min-height: 36px; padding: 0 8px; font-size: .8rem; }
+.in-report { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; cursor: pointer; } .in-report input { width: 18px; height: 18px; margin: 0; }
 .display-width { margin: 4px 0 0; grid-template-columns: 1fr 80px; align-items: center; } .display-width input { min-height: 34px; }
 
 .viewer { position: absolute; inset: 0; overflow: hidden; background: #e9edf2; }

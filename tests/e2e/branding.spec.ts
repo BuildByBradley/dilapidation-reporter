@@ -47,7 +47,7 @@ async function setCreator(page: Page, email: string) {
   }), email);
 }
 async function openReport(page: Page) {
-  await page.getByRole('button', { name: 'Report' }).click();
+  await page.getByRole('button', { name: 'Report', exact: true }).click();
   await page.waitForURL(/report$/);
   await expect(page.getByTestId('report-title')).toBeVisible();
 }

@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { dbAll, newProject, openSample } from './helpers';
+import { dbAll, newProject, openSample, settle, state } from './helpers';
 
 const haveTool = (t: string) => spawnSync('which', [t]).status === 0;
 
@@ -32,7 +32,7 @@ test('A19 full report ignores workspace filters and matches stored data; escapes
   await openSample(page);
   await page.getByLabel('Filter by severity').selectOption('major');
   await expect(page.getByTestId('finding-row')).toHaveCount(2);
-  await page.getByRole('button', { name: 'Report' }).click();
+  await page.getByRole('button', { name: 'Report', exact: true }).click();
   await page.waitForURL(/report$/);
   await expect(page.getByTestId('report-status')).toContainText('Ready to print', { timeout: 60_000 });
   const findings = await dbAll(page, 'findings'), photos = await dbAll(page, 'photos');
@@ -55,12 +55,33 @@ test('A19 full report ignores workspace filters and matches stored data; escapes
   expect(csv.trim().split('\r\n')).toHaveLength(9);
 });
 
+test('a floor unticked from the report is left out of it, findings and all', async ({ page }) => {
+  await openSample(page);
+  const floors = (await dbAll(page, 'floors')).sort((a, b) => a.order - b.order);
+  const findings = await dbAll(page, 'findings');
+  const l1 = floors[1], onL1 = findings.filter((f) => f.floorId === l1.id);
+  expect(onL1.length).toBeGreaterThan(0);
+  const box = page.getByRole('checkbox', { name: `Include ${l1.name} in report` });
+  await expect(box).toBeChecked();
+  await box.uncheck();
+  await expect(page.getByTestId('floor-slot').nth(1)).toContainText('not in report');
+  await expect.poll(async () => (await dbAll(page, 'floors')).find((f) => f.id === l1.id)?.excludeFromReport).toBe(true);
+  await page.getByRole('button', { name: 'Report', exact: true }).click();
+  await expect(page.getByTestId('report-status')).toContainText('Ready to print', { timeout: 60_000 });
+  await expect(page.getByTestId('report-finding')).toHaveCount(findings.length - onL1.length);
+  await expect(page.locator('.plan-img')).toHaveCount(4);
+  const text = await page.getByTestId('report').innerText();
+  for (const f of onL1) expect(text).not.toContain(f.reference);
+  expect(text).not.toContain(l1.name);
+  await expect(page.locator('.summary-grid table').first().locator('tr.total')).toContainText(String(findings.length - onL1.length));
+});
+
 test('empty floor without a plan is reported as not imported, never as inspected', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'New inspection' }).click();
   await page.getByLabel('Project name').fill('Empty report');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await page.getByRole('button', { name: 'Report' }).click();
+  await page.getByRole('button', { name: 'Report', exact: true }).click();
   await expect(page.getByTestId('report-status')).toContainText('Ready to print', { timeout: 30_000 });
   await expect(page.getByText(/Floor plan not imported/)).toHaveCount(5);
   await expect(page.getByText('No findings recorded.').first()).toBeVisible();
@@ -73,7 +94,7 @@ test('A20 printing a long report: legible pages, no clipped content, workspace c
   await addBulk(page, 40);
   await page.reload();
   await page.waitForFunction(() => (window as any).__inspector?.engine.debugState().visible.length === 5);
-  await page.getByRole('button', { name: 'Report' }).click();
+  await page.getByRole('button', { name: 'Report', exact: true }).click();
   await expect(page.getByTestId('report-status')).toContainText('Ready to print', { timeout: 180_000 });
   const total = (await dbAll(page, 'findings')).length;
   expect(total).toBe(48);
@@ -109,7 +130,7 @@ test('A20 printing a long report: legible pages, no clipped content, workspace c
 
 test('the report title can be changed in the project details (e.g. a works completion list)', async ({ page }) => {
   await newProject(page, 'Title test');
-  await page.getByRole('button', { name: 'Report' }).click();
+  await page.getByRole('button', { name: 'Report', exact: true }).click();
   await expect(page.getByTestId('report-title')).toHaveText('Conditioning Report'); // default
   await expect(page.getByTestId('report-logo')).toHaveCount(0); // not signed in with a paragon.co.za address, no project logo
   await page.goto('/#/');
@@ -118,6 +139,35 @@ test('the report title can be changed in the project details (e.g. a works compl
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   expect((await dbAll(page, 'projects'))[0].reportTitle).toBe('Works Completion List');
   await page.getByRole('link', { name: 'Title test' }).click();
-  await page.getByRole('button', { name: 'Report' }).click();
+  await page.getByRole('button', { name: 'Report', exact: true }).click();
   await expect(page.getByTestId('report-title')).toHaveText('Works Completion List');
+});
+
+test('"Report floors only" hides floors left out of the report from the 3D view, and shows them again when off', async ({ page }) => {
+  await openSample(page);
+  await settle(page);
+  const floors = (await dbAll(page, 'floors')).sort((a, b) => a.order - b.order);
+  const l1 = floors[1];
+  expect((await state(page)).visible).toContain(l1.id);
+  await page.getByRole('checkbox', { name: `Include ${l1.name} in report` }).uncheck();
+  // ticking alone does not change the view
+  await expect.poll(async () => (await state(page)).visible).toContain(l1.id);
+  const toggle = page.getByRole('button', { name: 'Report floors only' });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(toggle).toContainText('1 hidden');
+  await expect.poll(async () => (await state(page)).visible).not.toContain(l1.id);
+  expect((await state(page)).visible).toHaveLength(4);
+  // remembered after a reload
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Report floors only' })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(async () => (await state(page)).visible.length).toBe(4);
+  // ticking it back in shows it straight away
+  await page.getByRole('checkbox', { name: `Include ${l1.name} in report` }).check();
+  await expect.poll(async () => (await state(page)).visible).toContain(l1.id);
+  await page.getByRole('checkbox', { name: `Include ${l1.name} in report` }).uncheck();
+  await expect.poll(async () => (await state(page)).visible).not.toContain(l1.id);
+  // turning the toggle off shows every floor
+  await page.getByRole('button', { name: 'Report floors only' }).click();
+  await expect.poll(async () => (await state(page)).visible.length).toBe(5);
 });

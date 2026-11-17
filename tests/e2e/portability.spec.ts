@@ -107,7 +107,7 @@ test('A18 replacing a plan with retained pins flags them in the workspace, edito
   // positions are unchanged ("normalised positions kept")
   await page.getByTestId('finding-row').filter({ hasText: 'G-001' }).click();
   await expect(page.getByTestId('review-warning')).toBeVisible();
-  await page.getByRole('button', { name: 'Report' }).click();
+  await page.getByRole('button', { name: 'Report', exact: true }).click();
   await expect(page.getByTestId('report-review-warning')).toContainText('G-001, G-002');
   await expect(page.getByTestId('report-finding').filter({ hasText: 'G-001' })).toContainText('Location needs review');
   await page.getByRole('button', { name: /Back to inspection/ }).click();

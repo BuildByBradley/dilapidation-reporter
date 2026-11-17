@@ -9,6 +9,8 @@ declare global { interface Window { __inspector?: { engine: ViewerEngine } } }
 
 export type ViewerPaneProps = {
   floors: Floor[]; findings: Finding[]; categories: Category[];
+  /** "Report floors only" is on: floors left out of the report are hidden (hiddenCount of them). */
+  reportOnly?: boolean; hiddenCount?: number; onToggleReportOnly?(): void;
   mode: ViewerMode; interaction: InteractionMode; selectedId: string | null; draft: Draft;
   readOnly: boolean;
   compact?: boolean;
@@ -121,7 +123,9 @@ export function ViewerPane(p: ViewerPaneProps) {
         data-mode={p.mode.kind} data-placing={placing ? 'true' : 'false'}
         aria-label={overview ? 'Building overview: stacked floor plans. Tap a floor to isolate it. Drag horizontally to rotate, two fingers to pan and zoom.' : `${floorName ?? 'Floor'} plan, ${is2d ? '2D top-down' : '3D axonometric'} view. Arrow keys ${is2d ? 'pan' : 'rotate'}, plus and minus zoom, F fits.`}
       />
-      {importedCount === 0 && <div className="viewer-empty"><p>No floor plans yet. Use <strong>Import</strong> on a floor to add a PNG, JPEG or PDF plan.</p></div>}
+      {importedCount === 0 && (p.reportOnly && p.hiddenCount
+        ? <div className="viewer-empty"><p>No floors with a plan are ticked to be in the report. Tick <strong>Include in report</strong> on a floor, or turn off <strong>Report floors only</strong>.</p></div>
+        : <div className="viewer-empty"><p>No floor plans yet. Use <strong>Import</strong> on a floor to add a PNG, JPEG or PDF plan.</p></div>)}
       {errList.length > 0 && <div className="viewer-error" role="alert">{errList[0]}</div>}
       {floorName && <div className="viewer-title">{floorName}<span className="muted small"> · {is2d ? '2D' : '3D'}</span>
         {detail.kind === 'sharp' && <span className="small detail-ok" data-testid="detail-status" title="Zoomed areas are re-drawn from the original PDF"> · PDF sharp</span>}
@@ -139,6 +143,12 @@ export function ViewerPane(p: ViewerPaneProps) {
         <button aria-label="Fit view" onClick={() => engine.fit()}><span className="lbl-full">Fit view</span><span className="lbl-short">Fit</span></button>
         <button aria-label="Return to building" onClick={p.onReturn} disabled={overview}><span className="lbl-full">Return to building</span><span className="lbl-short">Building</span></button>
         <button aria-label={is2d ? 'Show 3D' : '2D view'} onClick={p.onToggle2D} aria-pressed={is2d} title="Switch between 2D plan and 3D view"><span className="lbl-full">{is2d ? 'Show 3D' : '2D view'}</span><span className="lbl-short">{is2d ? '3D' : '2D'}</span></button>
+        {p.onToggleReportOnly && (
+          <button aria-label="Report floors only" aria-pressed={!!p.reportOnly} onClick={p.onToggleReportOnly}
+            title={p.reportOnly ? 'Showing only floors ticked "Include in report". Click to show all floors.' : 'Show only the floors ticked "Include in report"'}>
+            <span className="lbl-full">{p.reportOnly ? `Report floors only${p.hiddenCount ? ` (${p.hiddenCount} hidden)` : ''}` : 'Report floors only'}</span><span className="lbl-short">Report</span>
+          </button>
+        )}
       </div>
 
       <div className="gesture-help" data-testid="gesture-help">
