@@ -213,24 +213,24 @@ describe('plan replacement (A18, A03)', () => {
 });
 
 describe('linked descriptions (reusable wording)', () => {
-  const mk = async (floorId: string, catId: string, description: string, link?: repo.DescriptionChoice) =>
+  const mk = async (floorId: string, catId: string, description: string, link?: repo.WordingChoice) =>
     repo.createFinding({ floorId, u: 0.5, v: 0.5, categoryId: catId, title: 't', description, descriptionLink: link });
   it('suggests wording already used, most used first, matching every typed word', async () => {
     const { p, floors, cats } = await seeded();
     await mk(floors[0].id, cats[0].id, 'Hairline crack to plaster');
     await mk(floors[1].id, cats[0].id, 'Hairline crack to plaster');
     await mk(floors[1].id, cats[0].id, 'Damp staining to wall');
-    const all = repo.descriptionSuggestions(await repo.listFindings(p.id));
+    const all = repo.wordingSuggestions(await repo.listFindings(p.id), 'description');
     expect(all.map((s) => [s.text, s.count])).toEqual([['Hairline crack to plaster', 2], ['Damp staining to wall', 1]]);
-    expect(repo.matchDescriptions(all, 'crack plas').map((s) => s.text)).toEqual(['Hairline crack to plaster']);
-    expect(repo.matchDescriptions(all, 'to')).toHaveLength(2);
-    expect(repo.matchDescriptions(all, 'x')).toEqual([]);
+    expect(repo.matchWording(all, 'crack plas').map((s) => s.text)).toEqual(['Hairline crack to plaster']);
+    expect(repo.matchWording(all, 'to')).toHaveLength(2);
+    expect(repo.matchWording(all, 'x')).toEqual([]);
   });
   it('picking wording links it; editing one linked finding changes them all; make unique splits one off', async () => {
     const { p, floors, cats } = await seeded();
     const a = await mk(floors[0].id, cats[0].id, 'Hairline crack');
     const b = await mk(floors[0].id, cats[0].id, 'Hairline crack');
-    const [s] = repo.descriptionSuggestions(await repo.listFindings(p.id));
+    const [s] = repo.wordingSuggestions(await repo.listFindings(p.id), 'description');
     const c = await mk(floors[1].id, cats[0].id, 'Hairline crack', { text: s.text, linkId: s.linkId });
     const link = (await db.findings.get(c.id))!.descriptionLinkId;
     expect(link).toBeDefined();
@@ -239,19 +239,19 @@ describe('linked descriptions (reusable wording)', () => {
     await repo.updateFinding(b.id, { description: 'Hairline crack, 0.5 mm, to plaster' });
     for (const id of [a.id, b.id, c.id]) expect((await db.findings.get(id))!.description).toBe('Hairline crack, 0.5 mm, to plaster');
     // a slightly different case: make it unique and change only that one
-    await repo.unlinkDescription(c.id);
+    await repo.unlinkWording(c.id, 'description');
     await repo.updateFinding(c.id, { description: 'Hairline crack to ceiling' });
     expect((await db.findings.get(c.id))!.description).toBe('Hairline crack to ceiling');
     expect((await db.findings.get(a.id))!.description).toBe('Hairline crack, 0.5 mm, to plaster');
     // a link left with one member is dropped
-    await repo.unlinkDescription(b.id);
+    await repo.unlinkWording(b.id, 'description');
     expect((await db.findings.get(a.id))!.descriptionLinkId).toBeUndefined();
   });
   it('linking an existing finding joins a group and takes its current wording; copies to floors stay linked', async () => {
     const { p, floors, cats } = await seeded();
     const a = await mk(floors[0].id, cats[0].id, 'Rust to balustrade');
     const b = await mk(floors[0].id, cats[0].id, 'Rust');
-    await repo.linkDescription(b.id, { text: 'Rust to balustrade' });
+    await repo.linkWording(b.id, 'description', { text: 'Rust to balustrade' });
     const link = (await db.findings.get(a.id))!.descriptionLinkId!;
     expect((await db.findings.get(b.id))).toMatchObject({ description: 'Rust to balustrade', descriptionLinkId: link });
     const [copy] = await repo.copyFindingToFloors(b.id, [floors[2].id]);
@@ -271,6 +271,29 @@ describe('linked descriptions (reusable wording)', () => {
     const rf = await repo.listFindings(restored.id);
     expect(new Set(rf.filter((f) => f.description === 'Surface rust to balustrade').map((f) => f.descriptionLinkId)).size).toBe(1);
     expect(rf.filter((f) => f.descriptionLinkId).length).toBe(2);
+  });
+});
+
+describe('linked titles', () => {
+  it('titles link and edit together like descriptions, independently of the description link', async () => {
+    const { p, floors, cats } = await seeded();
+    const a = await repo.createFinding({ floorId: floors[0].id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: 'Hairline crack', description: 'One' });
+    const [s] = repo.matchWording(repo.wordingSuggestions(await repo.listFindings(p.id), 'title'), 'hair');
+    expect(s.text).toBe('Hairline crack');
+    const b = await repo.createFinding({ floorId: floors[1].id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: 'Hair', description: 'Two', titleLink: s });
+    const fb = (await db.findings.get(b.id))!;
+    expect(fb.title).toBe('Hairline crack');
+    expect(fb.titleLinkId).toBeDefined();
+    expect(fb.descriptionLinkId).toBeUndefined();
+    await repo.updateFinding(a.id, { title: 'Hairline crack to plaster' });
+    expect((await db.findings.get(b.id))!.title).toBe('Hairline crack to plaster');
+    expect((await db.findings.get(b.id))!.description).toBe('Two');
+    await expect(repo.updateFinding(a.id, { title: ' ' })).rejects.toThrow(/title is required/);
+    expect((await db.findings.get(b.id))!.title).toBe('Hairline crack to plaster');
+    await repo.unlinkWording(b.id, 'title');
+    await repo.updateFinding(b.id, { title: 'Hairline crack to ceiling' });
+    expect((await db.findings.get(a.id))!.title).toBe('Hairline crack to plaster');
+    expect((await db.findings.get(a.id))!.titleLinkId).toBeUndefined();
   });
 });
 

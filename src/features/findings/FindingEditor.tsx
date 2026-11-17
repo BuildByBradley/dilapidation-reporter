@@ -4,7 +4,7 @@ import { Confirm, Dialog, useToast } from '../../components/ui';
 import { registerFlush } from '../../data/flush';
 import * as repo from '../../data/repo';
 import { NEW_CATEGORY, promptNewCategory } from '../categories/newCategory';
-import { DescriptionField } from './DescriptionField';
+import { WordingField } from './WordingField';
 import { SEVERITIES, type Category, type Finding, type Floor, type Photo, type Severity } from '../../lib/types';
 
 type Fields = { title: string; description: string; locationNotes: string; severity: Severity; categoryId: string };
@@ -53,6 +53,31 @@ export function FindingEditor({ finding, allFindings = [], categories, floors, p
     clearTimeout(timer.current);
     if (immediate) void save(); else timer.current = setTimeout(() => void save(), 500);
   };
+  /** Title / description box with suggestions; picked wording is linked to the findings that use it. */
+  const wording = (field: repo.WordingField, label: string, rows: number) => {
+    const linkId = field === 'title' ? finding.titleLinkId : finding.descriptionLinkId;
+    return (
+      <WordingField field={field} label={label} rows={rows} value={f[field]} disabled={readOnly} findings={allFindings} selfId={finding.id}
+        link={linkId ? { text: finding[field], linkId } : undefined}
+        onType={(t) => change({ [field]: t })}
+        onPick={async (c) => {
+          // the typed search text is replaced by the chosen wording: drop it rather than save it
+          clearTimeout(timer.current);
+          const rest = { ...latest.current.f, [field]: finding[field] };
+          latest.current = { ...latest.current, f: rest };
+          setF((p) => ({ ...p, [field]: c.text }));
+          try {
+            if (JSON.stringify(rest) !== JSON.stringify(latest.current.base)) await save();
+            await repo.linkWording(finding.id, field, c);
+            setDirty(false);
+          } catch (e) { toast('error', e instanceof Error ? e.message : String(e)); }
+        }}
+        onUnlink={async () => {
+          await save();
+          try { await repo.unlinkWording(finding.id, field); toast('ok', `This finding now has its own ${field}`); } catch (e) { toast('error', e instanceof Error ? e.message : String(e)); }
+        }} />
+    );
+  };
   const floor = floors.find((x) => x.id === finding.floorId);
   const selectable = categories.filter((c) => !c.archived || c.id === f.categoryId);
 
@@ -69,7 +94,7 @@ export function FindingEditor({ finding, allFindings = [], categories, floors, p
           <div className="row"><button disabled={readOnly} onClick={onRelocate}>Relocate pin</button><button disabled={readOnly} onClick={() => repo.clearLocationReview(finding.id).catch((e) => toast('error', String(e)))}>Mark location as reviewed</button></div>
         </div>
       )}
-      <label>Title<input value={f.title} disabled={readOnly} onChange={(e) => change({ title: e.target.value })} /></label>
+      {wording('title', 'Title', 1)}
       <div className="two">
         <label>Category<select value={f.categoryId} disabled={readOnly} onChange={async (e) => {
           if (e.target.value !== NEW_CATEGORY) { change({ categoryId: e.target.value }, true); return; }
@@ -83,25 +108,7 @@ export function FindingEditor({ finding, allFindings = [], categories, floors, p
         </select></label>
       </div>
       <p className="small muted">Severity is an observation label for this record, not a safety determination.</p>
-      <DescriptionField rows={4} value={f.description} disabled={readOnly} findings={allFindings} selfId={finding.id}
-        link={finding.descriptionLinkId ? { text: finding.description, linkId: finding.descriptionLinkId } : undefined}
-        onType={(t) => change({ description: t })}
-        onPick={async (c) => {
-          // the typed search text is replaced by the chosen wording: drop it rather than save it
-          clearTimeout(timer.current);
-          const rest = { ...latest.current.f, description: finding.description };
-          latest.current = { ...latest.current, f: rest };
-          setF((p) => ({ ...p, description: c.text }));
-          try {
-            if (JSON.stringify(rest) !== JSON.stringify(latest.current.base)) await save();
-            await repo.linkDescription(finding.id, c);
-            setDirty(false);
-          } catch (e) { toast('error', e instanceof Error ? e.message : String(e)); }
-        }}
-        onUnlink={async () => {
-          await save();
-          try { await repo.unlinkDescription(finding.id); toast('ok', 'This finding now has its own wording'); } catch (e) { toast('error', e instanceof Error ? e.message : String(e)); }
-        }} />
+      {wording('description', 'Description', 4)}
       <label>Location notes<textarea rows={2} value={f.locationNotes} disabled={readOnly} onChange={(e) => change({ locationNotes: e.target.value })} /></label>
       {error && <div className="error" role="alert">Not saved: {error} <button onClick={() => void save()}>Retry save</button></div>}
       {dirty && !error && <p className="small muted" aria-live="polite">Unsaved changes…</p>}

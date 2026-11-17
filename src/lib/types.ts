@@ -43,6 +43,8 @@ export type Finding = {
    * one changes it on all of them. Absent: the description is this finding's own.
    */
   descriptionLinkId?: string;
+  /** Linked title, the same way. */
+  titleLinkId?: string;
 };
 export type Category = {
   id: string; projectId: string; name: string; colour: string;

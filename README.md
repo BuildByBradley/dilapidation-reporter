@@ -50,7 +50,7 @@ The long-report print test additionally needs poppler (`pdftotext`, `pdfinfo`, `
    Each floor has one remove button that works in steps, each confirmed: *Remove pins* (deletes its findings), then *Remove plan*, then *Remove floor*. Untick *Include in report* on a floor to leave it, and all its findings, out of the report, summary and CSV (the floor and its findings stay in the project).
    Replacing a plan that has findings forces an explicit choice: *keep pin positions for manual review* (pins are flagged
    until you relocate or mark them reviewed) or *remove that floor’s findings*. A failed import changes nothing.
-   **Reusing wording:** as you type a finding's description, wording already used in the project is offered below the box. Picking one *links* it (like a SketchUp component): editing linked wording changes it on every finding that shares it. *Make unique* gives one finding its own copy to change on its own.
+   **Reusing wording:** as you type a finding's title or description, wording already used in the project is offered below the box. Picking one *links* it (like a SketchUp component): editing linked wording changes it on every finding that shares it. *Make unique* gives one finding its own copy to change on its own.
 3. **Navigate** — overview shows the stack. Tap a floor (or its list entry) to isolate it: every other floor fades out
    completely and is removed from rendering and hit-testing. Return with **Return to building**. **2D view** shows the same
    floor top-down using the same stored coordinates.

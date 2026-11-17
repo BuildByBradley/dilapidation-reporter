@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type Ref } from 'react';
 import { useObjectUrl, useToast } from '../../components/ui';
-import type { DescriptionChoice, ProcessedImage } from '../../data/repo';
-import { DescriptionField } from './DescriptionField';
+import type { WordingChoice, ProcessedImage } from '../../data/repo';
+import { WordingField } from './WordingField';
 import { ImportError, cropPhoto, processPhoto, rotatePhoto } from '../../lib/imaging';
 import { PhotoCrop } from '../photos/PhotoCrop';
 import { NEW_CATEGORY, promptNewCategory } from '../categories/newCategory';
@@ -10,7 +10,7 @@ import { CameraDialog } from '../photos/PhotoSection';
 import { PhotoMarkup } from '../photos/PhotoMarkup';
 import { Dialog } from '../../components/ui';
 
-export type NewFindingForm = { title: string; categoryId: string; severity: Severity; description: string; locationNotes: string; descriptionLink?: DescriptionChoice };
+export type NewFindingForm = { title: string; categoryId: string; severity: Severity; description: string; locationNotes: string; titleLink?: WordingChoice; descriptionLink?: WordingChoice };
 export const emptyForm = (categoryId = ''): NewFindingForm => ({ title: '', categoryId, severity: 'not_assessed', description: '', locationNotes: '' });
 
 /**
@@ -88,7 +88,10 @@ export function PlacementPanel({ mode, reference, floorName, u, v, assetWidth, a
         <>
           <div className="place-step" aria-label="Details">
             <h3>{stepNo(2)}Details</h3>
-            <label>Title *<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} autoFocus={!compact} enterKeyHint="done" /></label>
+            <WordingField field="title" label="Title *" value={form.title} findings={findings} unsaved autoFocus={!compact} link={form.titleLink}
+              onType={(t) => setForm({ ...form, title: t, titleLink: undefined })}
+              onPick={(c) => setForm({ ...form, title: c.text, titleLink: c })}
+              onUnlink={() => setForm({ ...form, titleLink: undefined })} />
             <div className="two">
               <label>Category *<select value={form.categoryId} onChange={async (e) => {
                 if (e.target.value !== NEW_CATEGORY) { setForm({ ...form, categoryId: e.target.value }); return; }
@@ -103,7 +106,7 @@ export function PlacementPanel({ mode, reference, floorName, u, v, assetWidth, a
                 {SEVERITIES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
               </select></label>
             </div>
-            <DescriptionField rows={compact ? 2 : 3} value={form.description} findings={findings} unsaved
+            <WordingField field="description" label="Description" rows={compact ? 2 : 3} value={form.description} findings={findings} unsaved
               link={form.descriptionLink}
               onType={(t) => setForm({ ...form, description: t, descriptionLink: undefined })}
               onPick={(c) => setForm({ ...form, description: c.text, descriptionLink: c })}

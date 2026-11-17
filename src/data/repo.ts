@@ -322,26 +322,32 @@ export async function countFloorFindings(floorId: string) {
 export type NewFinding = {
   floorId: string; u: number; v: number; categoryId: string; title: string;
   severity?: Severity; description?: string; locationNotes?: string;
-  /** Link the description to wording already used in the project (see {@link DescriptionChoice}). */
-  descriptionLink?: DescriptionChoice;
+  /** Link the title / description to wording already used in the project (see {@link WordingChoice}). */
+  titleLink?: WordingChoice; descriptionLink?: WordingChoice;
 };
 
-// ---------- linked descriptions ----------
+// ---------- linked wording (titles and descriptions) ----------
+/** Fields whose wording can be reused and linked, like a SketchUp component. */
+export type WordingField = 'title' | 'description';
+const LINK_KEY = { title: 'titleLinkId', description: 'descriptionLinkId' } as const;
+const linkOf = (f: Finding, field: WordingField) => f[LINK_KEY[field]];
+
 /**
  * A wording already used in the project, offered as a suggestion: either a linked group (findings sharing a
- * descriptionLinkId) or the unlinked findings that happen to have exactly this text.
+ * link id) or the unlinked findings that happen to have exactly this text.
  */
-export type DescriptionChoice = { text: string; linkId?: string };
-export type DescriptionSuggestion = DescriptionChoice & { count: number; references: string[] };
+export type WordingChoice = { text: string; linkId?: string };
+export type WordingSuggestion = WordingChoice & { count: number; references: string[] };
 
-/** Every distinct wording in a set of findings, most used first. */
-export function descriptionSuggestions(findings: Finding[]): DescriptionSuggestion[] {
-  const groups = new Map<string, DescriptionSuggestion>();
+/** Every distinct wording of a field in a set of findings, most used first. */
+export function wordingSuggestions(findings: Finding[], field: WordingField): WordingSuggestion[] {
+  const groups = new Map<string, WordingSuggestion>();
   for (const f of findings) {
-    const text = f.description.trim() ? f.description : '';
-    if (!text) continue;
-    const key = f.descriptionLinkId ? `link:${f.descriptionLinkId}` : `text:${text}`;
-    const g = groups.get(key) ?? { text, linkId: f.descriptionLinkId, count: 0, references: [] };
+    const text = f[field];
+    if (!text.trim()) continue;
+    const linkId = linkOf(f, field);
+    const key = linkId ? `link:${linkId}` : `text:${text}`;
+    const g = groups.get(key) ?? { text, linkId, count: 0, references: [] };
     g.count++; g.references.push(f.reference);
     groups.set(key, g);
   }
@@ -349,63 +355,68 @@ export function descriptionSuggestions(findings: Finding[]): DescriptionSuggesti
 }
 
 /** Suggestions matching what has been typed: every typed word must appear; wording that starts with it ranks first. */
-export function matchDescriptions(all: DescriptionSuggestion[], typed: string, exclude?: DescriptionChoice, limit = 6): DescriptionSuggestion[] {
+export function matchWording(all: WordingSuggestion[], typed: string, limit = 6): WordingSuggestion[] {
   const q = typed.trim().toLowerCase();
   if (q.length < 2) return [];
   const words = q.split(/\s+/);
-  const same = (s: DescriptionSuggestion) => !!exclude && (exclude.linkId ? s.linkId === exclude.linkId : !s.linkId && s.text === exclude.text);
   return all
-    .filter((s) => !same(s) && s.text.trim().toLowerCase() !== q && words.every((w) => s.text.toLowerCase().includes(w)))
+    .filter((s) => s.text.trim().toLowerCase() !== q && words.every((w) => s.text.toLowerCase().includes(w)))
     .map((s) => ({ s, starts: s.text.toLowerCase().startsWith(q) ? 0 : 1 }))
     .sort((a, b) => a.starts - b.starts)
     .slice(0, limit).map((x) => x.s);
 }
 
+const inProject = (projectId: string) => db.findings.where('projectId').equals(projectId);
+
 /**
  * Resolve a choice to a link id inside a transaction, linking the unlinked findings that share its text.
  * Undefined when no other finding uses the wording any more (nothing to link to).
  */
-async function resolveLink(projectId: string, choice: DescriptionChoice, exceptId?: string): Promise<string | undefined> {
-  const inProject = () => db.findings.where('projectId').equals(projectId);
-  if (choice.linkId && await inProject().filter((f) => f.id !== exceptId && f.descriptionLinkId === choice.linkId).count()) return choice.linkId;
-  const same = inProject().filter((f) => f.id !== exceptId && !f.descriptionLinkId && f.description === choice.text);
+async function resolveLink(projectId: string, field: WordingField, choice: WordingChoice, exceptId?: string): Promise<string | undefined> {
+  if (choice.linkId && await inProject(projectId).filter((f) => f.id !== exceptId && linkOf(f, field) === choice.linkId).count()) return choice.linkId;
+  const same = inProject(projectId).filter((f) => f.id !== exceptId && !linkOf(f, field) && f[field] === choice.text);
   if (!(await same.count())) return undefined;
   const linkId = uuid();
-  await same.modify({ descriptionLinkId: linkId, updatedAt: nowIso() });
+  await same.modify({ [LINK_KEY[field]]: linkId, updatedAt: nowIso() });
   return linkId;
 }
+/** The current wording of a link group (it may have been edited since a suggestion was shown). */
+async function groupText(projectId: string, field: WordingField, linkId: string | undefined, exceptId?: string) {
+  if (!linkId) return undefined;
+  return (await inProject(projectId).filter((x) => x.id !== exceptId && linkOf(x, field) === linkId).first())?.[field];
+}
 
-/** Give a finding a wording already used in the project, linked to the findings that use it. */
-export async function linkDescription(findingId: string, choice: DescriptionChoice): Promise<void> {
+/** Give a finding a title or description already used in the project, linked to the findings that use it. */
+export async function linkWording(findingId: string, field: WordingField, choice: WordingChoice): Promise<void> {
   return tracked(() => db.transaction('rw', [db.findings, db.projects], async () => {
     const f = await db.findings.get(findingId);
     if (!f) throw new RepoError('Finding not found');
-    const old = f.descriptionLinkId;
-    await db.findings.update(findingId, { descriptionLinkId: undefined });
-    const linkId = await resolveLink(f.projectId, choice, findingId);
-    // the group's current wording wins (it may have been edited since the suggestion was shown)
-    const member = linkId ? await db.findings.where('projectId').equals(f.projectId).filter((x) => x.id !== findingId && x.descriptionLinkId === linkId).first() : undefined;
-    await db.findings.update(findingId, { descriptionLinkId: linkId, description: member?.description ?? choice.text, updatedAt: nowIso() });
-    if (old) await dissolveIfAlone(f.projectId, old);
+    const old = linkOf(f, field);
+    await db.findings.update(findingId, { [LINK_KEY[field]]: undefined });
+    const linkId = await resolveLink(f.projectId, field, choice, findingId);
+    const text = (await groupText(f.projectId, field, linkId, findingId)) ?? choice.text;
+    await db.findings.update(findingId, { [LINK_KEY[field]]: linkId, [field]: text, updatedAt: nowIso() });
+    if (old) await dissolveIfAlone(f.projectId, field, old);
     await touch(f.projectId);
   }));
 }
 
 /** "Make unique": this finding keeps its current wording but stops sharing it. */
-export async function unlinkDescription(findingId: string): Promise<void> {
+export async function unlinkWording(findingId: string, field: WordingField): Promise<void> {
   return tracked(() => db.transaction('rw', [db.findings, db.projects], async () => {
     const f = await db.findings.get(findingId);
-    if (!f?.descriptionLinkId) return;
-    await db.findings.update(findingId, { descriptionLinkId: undefined, updatedAt: nowIso() });
-    await dissolveIfAlone(f.projectId, f.descriptionLinkId);
+    const old = f && linkOf(f, field);
+    if (!f || !old) return;
+    await db.findings.update(findingId, { [LINK_KEY[field]]: undefined, updatedAt: nowIso() });
+    await dissolveIfAlone(f.projectId, field, old);
     await touch(f.projectId);
   }));
 }
 
 /** A link with a single member links nothing: drop it. */
-async function dissolveIfAlone(projectId: string, linkId: string) {
-  const left = await db.findings.where('projectId').equals(projectId).filter((x) => x.descriptionLinkId === linkId).toArray();
-  if (left.length === 1) await db.findings.update(left[0].id, { descriptionLinkId: undefined });
+async function dissolveIfAlone(projectId: string, field: WordingField, linkId: string) {
+  const left = await inProject(projectId).filter((x) => linkOf(x, field) === linkId).toArray();
+  if (left.length === 1) await db.findings.update(left[0].id, { [LINK_KEY[field]]: undefined });
 }
 
 export async function createFinding(input: NewFinding): Promise<Finding> {
@@ -430,11 +441,11 @@ export async function createFinding(input: NewFinding): Promise<Finding> {
       u: input.u, v: input.v, categoryId: cat.id, severity: input.severity ?? 'not_assessed', title: input.title.trim(),
       description: input.description ?? '', locationNotes: input.locationNotes ?? '', locationNeedsReview: false, createdAt: t, updatedAt: t,
     };
-    if (input.descriptionLink) {
-      const linkId = await resolveLink(project.id, input.descriptionLink);
-      const member = linkId ? await db.findings.where('projectId').equals(project.id).filter((x) => x.descriptionLinkId === linkId).first() : undefined;
-      if (linkId) finding.descriptionLinkId = linkId;
-      finding.description = member?.description ?? input.descriptionLink.text;
+    for (const [field, choice] of [['title', input.titleLink], ['description', input.descriptionLink]] as const) {
+      if (!choice) continue;
+      const linkId = await resolveLink(project.id, field, choice);
+      if (linkId) finding[LINK_KEY[field]] = linkId;
+      finding[field] = (await groupText(project.id, field, linkId)) ?? choice.text;
     }
     await db.findings.add(finding);
     await db.floors.update(floor.id, { nextFindingNumber: number + 1, numberedAs: code });
@@ -454,11 +465,11 @@ export async function updateFinding(id: string, patch: FindingPatch): Promise<vo
     }
     const t = nowIso();
     await db.findings.update(id, { ...patch, updatedAt: t });
-    // linked wording: the new description goes to every finding that shares it
-    if (patch.description !== undefined && f.descriptionLinkId) {
-      await db.findings.where('projectId').equals(f.projectId)
-        .filter((x) => x.id !== id && x.descriptionLinkId === f.descriptionLinkId)
-        .modify({ description: patch.description, updatedAt: t });
+    // linked wording: a new title / description goes to every finding that shares it
+    for (const field of ['title', 'description'] as const) {
+      const linkId = linkOf(f, field), text = patch[field];
+      if (text === undefined || !linkId) continue;
+      await inProject(f.projectId).filter((x) => x.id !== id && linkOf(x, field) === linkId).modify({ [field]: text, updatedAt: t });
     }
     await touch(f.projectId);
   }));
@@ -482,7 +493,7 @@ async function deleteFindingInTx(id: string) {
   await db.photos.bulkDelete(photos.map((p) => p.id));
   for (const p of photos) await removeAsset(p.assetId);
   await db.findings.delete(id);
-  if (f.descriptionLinkId) await dissolveIfAlone(f.projectId, f.descriptionLinkId);
+  for (const field of ['title', 'description'] as const) { const l = linkOf(f, field); if (l) await dissolveIfAlone(f.projectId, field, l); }
 }
 export async function deleteFinding(id: string): Promise<void> {
   return tracked(() => db.transaction('rw', [db.findings, db.photos, db.assets, db.blobs, db.floors, db.projects], async () => {
@@ -507,6 +518,7 @@ export async function copyFindingToFloors(findingId: string, floorIds: string[])
       if (!floor || floor.projectId !== src.projectId) throw new RepoError('Floor not found');
       const copy = await createFinding({ floorId, u: src.u, v: src.v, categoryId: src.categoryId, title: src.title, severity: src.severity,
         description: src.description, locationNotes: src.locationNotes,
+        titleLink: src.titleLinkId ? { text: src.title, linkId: src.titleLinkId } : undefined,
         descriptionLink: src.descriptionLinkId ? { text: src.description, linkId: src.descriptionLinkId } : undefined });
       const t = nowIso();
       await db.photos.bulkAdd(photos.map((p) => ({ ...p, id: uuid(), findingId: copy.id, createdAt: t })));

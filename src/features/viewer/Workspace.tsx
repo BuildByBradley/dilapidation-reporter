@@ -191,7 +191,7 @@ export function Workspace({ projectId }: { projectId: string }) {
         setSelectedId(interaction.findingId);
         toast('ok', 'Pin relocated');
       } else {
-        const f = await repo.createFinding({ floorId: draft.floorId, u: draft.u, v: draft.v, categoryId: form.categoryId, title: form.title, severity: form.severity, description: form.description, locationNotes: form.locationNotes, descriptionLink: form.descriptionLink });
+        const f = await repo.createFinding({ floorId: draft.floorId, u: draft.u, v: draft.v, categoryId: form.categoryId, title: form.title, severity: form.severity, description: form.description, locationNotes: form.locationNotes, titleLink: form.titleLink, descriptionLink: form.descriptionLink });
         lastCategory.current = form.categoryId;
         // The finding is saved first; photos follow. A failed photo leaves the finding in place and says which.
         let failed = 0;
