@@ -289,7 +289,7 @@ test.describe('findings, photos, categories, persistence (A11-A15)', () => {
     await withPlans(page);
     await addPin(page, 'Ground', [0.3, 0.3], 'Original');
     await page.getByTestId('finding-editor').getByLabel('Title').fill('Edited right before leaving');
-    await page.getByRole('button', { name: 'Report' }).click();
+    await page.getByRole('button', { name: 'Report', exact: true }).click();
     await page.waitForURL(/report$/);
     await expect(page.getByTestId('report-finding')).toContainText('Edited right before leaving');
   });

@@ -105,6 +105,10 @@ export function Workspace({ projectId }: { projectId: string }) {
   };
 
   const floorMap = useMemo(() => new Map(floors.map((f) => [f.id, f])), [floors]);
+  // "Report floors only": the viewer shows just the floors ticked to be in the report (remembered on this device).
+  const [reportOnly, setReportOnly] = useState(() => { try { return localStorage.getItem('viewReportFloorsOnly') === '1'; } catch { return false; } });
+  const toggleReportOnly = () => setReportOnly((v) => { try { localStorage.setItem('viewReportFloorsOnly', v ? '0' : '1'); } catch { /* this session only */ } return !v; });
+  const viewFloors = useMemo(() => (reportOnly ? floors.filter((f) => !f.excludeFromReport) : floors), [floors, reportOnly]);
   const assetMap = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets]);
   const counts = useMemo(() => findings.reduce<Record<string, number>>((m, f) => ({ ...m, [f.floorId]: (m[f.floorId] ?? 0) + 1 }), {}), [findings]);
   const selected = findings.find((f) => f.id === selectedId) ?? null;
@@ -122,6 +126,10 @@ export function Workspace({ projectId }: { projectId: string }) {
   useEffect(() => {
     if (currentFloorId && floors.length && !floorMap.get(currentFloorId)?.planAssetId) setViewer({ kind: 'overview3d' });
   }, [floors, currentFloorId, floorMap]);
+  // ...and likewise when it is hidden by "Report floors only"
+  useEffect(() => {
+    if (reportOnly && currentFloorId && floorMap.get(currentFloorId)?.excludeFromReport) setViewer({ kind: 'overview3d' });
+  }, [reportOnly, currentFloorId, floorMap]);
 
   useEffect(() => { if (selectedId || draft || interaction.kind !== 'navigate') { setSheetOpen(true); setDrawer(null); } }, [selectedId, draft, interaction.kind]);
 
@@ -132,6 +140,8 @@ export function Workspace({ projectId }: { projectId: string }) {
     const f = floorMap.get(id);
     if (!f) return;
     if (!f.planAssetId) { setImportFor(id); return; }
+    // picking a floor that "Report floors only" hides shows all floors again, so the floor can be seen
+    if (reportOnly && f.excludeFromReport) { setReportOnly(false); try { localStorage.setItem('viewReportFloorsOnly', '0'); } catch { /* ignore */ } toast('info', `${f.name} is not in the report — showing all floors`); }
     guardDiscard(() => {
       cancelPlacement();
       setViewer((v) => ({ kind: v.kind === 'floor2d' ? 'floor2d' : 'isolated3d', floorId: id }));
@@ -211,7 +221,7 @@ export function Workspace({ projectId }: { projectId: string }) {
 
   const viewerPane = (
     <ViewerPane
-      floors={floors} findings={findings} categories={categories} mode={viewer} interaction={interaction} selectedId={selectedId} draft={draft} readOnly={readOnly} compact={compact}
+      floors={viewFloors} hiddenCount={floors.length - viewFloors.length} reportOnly={reportOnly} onToggleReportOnly={toggleReportOnly} findings={findings} categories={categories} mode={viewer} interaction={interaction} selectedId={selectedId} draft={draft} readOnly={readOnly} compact={compact}
       onFloorPick={selectFloor} onSelect={selectFinding} onPlace={onPlace} onEscape={onEscape} onReturn={toOverview} onToggle2D={toggle2D} onTogglePlace={togglePlace}
       onNotice={(t) => toast('info', t)} sheetMagnifier={sheetMag} magCrop={magCrop}
     />
