@@ -425,3 +425,12 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; margin: 0; f
 .logo-field .field-label { display: block; margin-bottom: 4px; }
 .logo-field .logo-preview { max-height: 48px; max-width: 200px; object-fit: contain; border: 1px solid var(--line, #ddd); padding: 4px; background: #fff; }
 .profile-form { margin: 8px 0; }
+/* description suggestions (linked wording) */
+.desc-field { position: relative; }
+.desc-suggest { list-style: none; margin: -4px 0 6px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: 0 6px 18px rgb(0 0 0 / .12); max-height: 260px; overflow: auto; }
+.desc-suggest li[role=option] { display: grid; gap: 2px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.desc-suggest li.active { background: #e3edfb; }
+.desc-suggest-text { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.desc-suggest-head { padding: 2px 8px 4px; }
+.desc-link { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: -2px 0 8px; padding: 6px 8px; border-radius: 6px; background: #eef4fc; border: 1px solid #c9dbf3; }
+.desc-link span { flex: 1 1 200px; }

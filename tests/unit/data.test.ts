@@ -212,6 +212,68 @@ describe('plan replacement (A18, A03)', () => {
   });
 });
 
+describe('linked descriptions (reusable wording)', () => {
+  const mk = async (floorId: string, catId: string, description: string, link?: repo.DescriptionChoice) =>
+    repo.createFinding({ floorId, u: 0.5, v: 0.5, categoryId: catId, title: 't', description, descriptionLink: link });
+  it('suggests wording already used, most used first, matching every typed word', async () => {
+    const { p, floors, cats } = await seeded();
+    await mk(floors[0].id, cats[0].id, 'Hairline crack to plaster');
+    await mk(floors[1].id, cats[0].id, 'Hairline crack to plaster');
+    await mk(floors[1].id, cats[0].id, 'Damp staining to wall');
+    const all = repo.descriptionSuggestions(await repo.listFindings(p.id));
+    expect(all.map((s) => [s.text, s.count])).toEqual([['Hairline crack to plaster', 2], ['Damp staining to wall', 1]]);
+    expect(repo.matchDescriptions(all, 'crack plas').map((s) => s.text)).toEqual(['Hairline crack to plaster']);
+    expect(repo.matchDescriptions(all, 'to')).toHaveLength(2);
+    expect(repo.matchDescriptions(all, 'x')).toEqual([]);
+  });
+  it('picking wording links it; editing one linked finding changes them all; make unique splits one off', async () => {
+    const { p, floors, cats } = await seeded();
+    const a = await mk(floors[0].id, cats[0].id, 'Hairline crack');
+    const b = await mk(floors[0].id, cats[0].id, 'Hairline crack');
+    const [s] = repo.descriptionSuggestions(await repo.listFindings(p.id));
+    const c = await mk(floors[1].id, cats[0].id, 'Hairline crack', { text: s.text, linkId: s.linkId });
+    const link = (await db.findings.get(c.id))!.descriptionLinkId;
+    expect(link).toBeDefined();
+    expect((await db.findings.get(a.id))!.descriptionLinkId).toBe(link);
+    expect((await db.findings.get(b.id))!.descriptionLinkId).toBe(link);
+    await repo.updateFinding(b.id, { description: 'Hairline crack, 0.5 mm, to plaster' });
+    for (const id of [a.id, b.id, c.id]) expect((await db.findings.get(id))!.description).toBe('Hairline crack, 0.5 mm, to plaster');
+    // a slightly different case: make it unique and change only that one
+    await repo.unlinkDescription(c.id);
+    await repo.updateFinding(c.id, { description: 'Hairline crack to ceiling' });
+    expect((await db.findings.get(c.id))!.description).toBe('Hairline crack to ceiling');
+    expect((await db.findings.get(a.id))!.description).toBe('Hairline crack, 0.5 mm, to plaster');
+    // a link left with one member is dropped
+    await repo.unlinkDescription(b.id);
+    expect((await db.findings.get(a.id))!.descriptionLinkId).toBeUndefined();
+  });
+  it('linking an existing finding joins a group and takes its current wording; copies to floors stay linked', async () => {
+    const { p, floors, cats } = await seeded();
+    const a = await mk(floors[0].id, cats[0].id, 'Rust to balustrade');
+    const b = await mk(floors[0].id, cats[0].id, 'Rust');
+    await repo.linkDescription(b.id, { text: 'Rust to balustrade' });
+    const link = (await db.findings.get(a.id))!.descriptionLinkId!;
+    expect((await db.findings.get(b.id))).toMatchObject({ description: 'Rust to balustrade', descriptionLinkId: link });
+    const [copy] = await repo.copyFindingToFloors(b.id, [floors[2].id]);
+    expect((await db.findings.get(copy.id))!.descriptionLinkId).toBe(link);
+    await repo.updateFinding(copy.id, { description: 'Surface rust to balustrade' });
+    expect((await db.findings.get(a.id))!.description).toBe('Surface rust to balustrade');
+    // deleting members down to one drops the link
+    await repo.deleteFinding(copy.id); await repo.deleteFinding(b.id);
+    expect((await db.findings.get(a.id))!.descriptionLinkId).toBeUndefined();
+    // backups keep links
+    // wording nobody else uses any more is used as plain text, not linked
+    const lone = await mk(floors[1].id, cats[0].id, 'x', { text: 'Rust to balustrade' });
+    const l = (await db.findings.get(lone.id))!;
+    expect([l.description, l.descriptionLinkId]).toEqual(['Rust to balustrade', undefined]);
+    await mk(floors[1].id, cats[0].id, 'x', { text: 'Surface rust to balustrade' });
+    const restored = await repo.saveBundleAsNew(parseBackup(await createBackup(await repo.loadBundle(p.id))));
+    const rf = await repo.listFindings(restored.id);
+    expect(new Set(rf.filter((f) => f.description === 'Surface rust to balustrade').map((f) => f.descriptionLinkId)).size).toBe(1);
+    expect(rf.filter((f) => f.descriptionLinkId).length).toBe(2);
+  });
+});
+
 describe('save status (A15)', () => {
   it('never reports Saved after a failed write and can retry', async () => {
     const p = await repo.createProject();

@@ -191,7 +191,7 @@ export function Workspace({ projectId }: { projectId: string }) {
         setSelectedId(interaction.findingId);
         toast('ok', 'Pin relocated');
       } else {
-        const f = await repo.createFinding({ floorId: draft.floorId, u: draft.u, v: draft.v, categoryId: form.categoryId, title: form.title, severity: form.severity, description: form.description, locationNotes: form.locationNotes });
+        const f = await repo.createFinding({ floorId: draft.floorId, u: draft.u, v: draft.v, categoryId: form.categoryId, title: form.title, severity: form.severity, description: form.description, locationNotes: form.locationNotes, descriptionLink: form.descriptionLink });
         lastCategory.current = form.categoryId;
         // The finding is saved first; photos follow. A failed photo leaves the finding in place and says which.
         let failed = 0;
@@ -273,13 +273,13 @@ export function Workspace({ projectId }: { projectId: string }) {
         mode={interaction.kind === 'relocatePin' ? 'relocate' : 'new'} reference={relocFinding?.reference} floorName={placementFloor.name}
         u={draft.u} v={draft.v} assetWidth={draftAsset.width} assetHeight={draftAsset.height} categories={categories} form={form} setForm={setForm}
         onNudge={nudge} onConfirm={confirmPlacement} onCancel={() => guardDiscard(cancelPlacement)} busy={saving}
-        compact={compact} magnifierRef={setSheetMag} magCrop={magCrop} setMagCrop={setMagCrop} onShowPlan={() => setSheetOpen(false)} pendingPhotos={pendingPhotos} setPendingPhotos={setPendingPhotos}
+        compact={compact} magnifierRef={setSheetMag} magCrop={magCrop} setMagCrop={setMagCrop} onShowPlan={() => setSheetOpen(false)} pendingPhotos={pendingPhotos} setPendingPhotos={setPendingPhotos} findings={findings}
       />
     ) : placing ? (
       <section className="editor"><h2>{interaction.kind === 'relocatePin' ? 'Relocate pin' : 'Add pin'}</h2><p>Tap the plan where the condition is. A target and magnifier will appear so you can fine-tune before saving.</p>
         {formDirty && <p className="small">Draft entries are kept until you cancel.</p>}<button onClick={() => guardDiscard(cancelPlacement)}>Cancel</button></section>
     ) : selected ? (
-      <FindingEditor key={selected.id} finding={selected} categories={categories} floors={floors} photos={photos.filter((p) => p.findingId === selected.id)} readOnly={readOnly}
+      <FindingEditor key={selected.id} finding={selected} allFindings={findings} categories={categories} floors={floors} photos={photos.filter((p) => p.findingId === selected.id)} readOnly={readOnly}
         onRelocate={() => startRelocate(selected.id)} onDeleted={() => setSelectedId(null)} onClose={() => setSelectedId(null)} />
     ) : null;
   const findingsList = <FindingsList findings={findings} floors={floors} categories={categories} selectedId={selectedId} onSelect={(id) => { setDrawer(null); selectFinding(id); setSheetOpen(true); }} />;

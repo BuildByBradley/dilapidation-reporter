@@ -38,6 +38,11 @@ export type Finding = {
   u: number; v: number; categoryId: string; severity: Severity;
   title: string; description: string; locationNotes: string;
   locationNeedsReview: boolean; createdAt: string; updatedAt: string;
+  /**
+   * Linked wording (like a SketchUp component): findings sharing this id share one description, so editing it on
+   * one changes it on all of them. Absent: the description is this finding's own.
+   */
+  descriptionLinkId?: string;
 };
 export type Category = {
   id: string; projectId: string; name: string; colour: string;
