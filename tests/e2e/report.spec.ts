@@ -55,6 +55,27 @@ test('A19 full report ignores workspace filters and matches stored data; escapes
   expect(csv.trim().split('\r\n')).toHaveLength(9);
 });
 
+test('a floor unticked from the report is left out of it, findings and all', async ({ page }) => {
+  await openSample(page);
+  const floors = (await dbAll(page, 'floors')).sort((a, b) => a.order - b.order);
+  const findings = await dbAll(page, 'findings');
+  const l1 = floors[1], onL1 = findings.filter((f) => f.floorId === l1.id);
+  expect(onL1.length).toBeGreaterThan(0);
+  const box = page.getByRole('checkbox', { name: `Include ${l1.name} in report` });
+  await expect(box).toBeChecked();
+  await box.uncheck();
+  await expect(page.getByTestId('floor-slot').nth(1)).toContainText('not in report');
+  await expect.poll(async () => (await dbAll(page, 'floors')).find((f) => f.id === l1.id)?.excludeFromReport).toBe(true);
+  await page.getByRole('button', { name: 'Report' }).click();
+  await expect(page.getByTestId('report-status')).toContainText('Ready to print', { timeout: 60_000 });
+  await expect(page.getByTestId('report-finding')).toHaveCount(findings.length - onL1.length);
+  await expect(page.locator('.plan-img')).toHaveCount(4);
+  const text = await page.getByTestId('report').innerText();
+  for (const f of onL1) expect(text).not.toContain(f.reference);
+  expect(text).not.toContain(l1.name);
+  await expect(page.locator('.summary-grid table').first().locator('tr.total')).toContainText(String(findings.length - onL1.length));
+});
+
 test('empty floor without a plan is reported as not imported, never as inspected', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'New inspection' }).click();

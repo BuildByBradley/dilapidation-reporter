@@ -54,7 +54,7 @@ export function FloorList({ floors, counts, mode, readOnly, onSelect, onImport, 
               {f.planAssetId ? <Thumb assetId={f.planAssetId} alt="" className="floor-thumb" /> : <span className="floor-thumb empty">+</span>}
               <span className="floor-text">
                 <span className="floor-name">{f.name}</span>
-                <span className="muted small">{f.planAssetId ? `${counts[f.id] ?? 0} finding${(counts[f.id] ?? 0) === 1 ? '' : 's'}` : 'No plan'}</span>
+                <span className="muted small">{f.planAssetId ? `${counts[f.id] ?? 0} finding${(counts[f.id] ?? 0) === 1 ? '' : 's'}` : 'No plan'}{f.excludeFromReport ? ' · not in report' : ''}</span>
               </span>
             </button>
             <div className="floor-actions">
@@ -72,6 +72,11 @@ export function FloorList({ floors, counts, mode, readOnly, onSelect, onImport, 
                 </>
               )}
             </div>
+            <label className="in-report small" title="Untick to leave this floor and all its findings out of the report">
+              <input type="checkbox" key={`${f.id}:${!!f.excludeFromReport}`} defaultChecked={!f.excludeFromReport} disabled={readOnly} aria-label={`Include ${f.name} in report`}
+                onChange={(e) => void guard(repo.updateFloor(f.id, { excludeFromReport: !e.target.checked }))} />
+              Include in report
+            </label>
             <label className="display-width small muted" title="Finding numbers on this floor start with this, e.g. G-001, L1-001, Roof-001">Number prefix
               <input key={`${f.id}:${f.code ?? ''}`} defaultValue={f.code ?? ''} placeholder={codes.get(f.id)} maxLength={6} disabled={readOnly} aria-label={`${f.name} number prefix`}
                 onBlur={(e) => { if (e.target.value !== (f.code ?? '')) void guard(repo.updateFloor(f.id, { code: e.target.value })); }}

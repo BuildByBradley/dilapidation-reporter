@@ -14,6 +14,7 @@ export const manifestSchema = z.object({
   floors: z.array(z.object({
     id: str, projectId: str, name: str, order: z.number().int(), planAssetId: str.optional(),
     displayWidth: z.number().positive().finite(), sourcePage: z.number().int().optional(), createdAt: str, updatedAt: str,
+    excludeFromReport: z.boolean().optional(),
   })),
   categories: z.array(z.object({ id: str, projectId: str, name: str, colour: str, order: z.number().int(), archived: z.boolean() })),
   findings: z.array(z.object({

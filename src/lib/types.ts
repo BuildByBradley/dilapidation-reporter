@@ -30,6 +30,8 @@ export type Floor = {
   code?: string;
   /** Next finding number on this floor, for references starting `numberedAs` (a new prefix starts again at 1). */
   nextFindingNumber?: number; numberedAs?: string;
+  /** Left out of the report (its plan page, findings, summary counts and CSV). Absent/false: included. */
+  excludeFromReport?: boolean;
 };
 export type Finding = {
   id: string; projectId: string; floorId: string; reference: string;

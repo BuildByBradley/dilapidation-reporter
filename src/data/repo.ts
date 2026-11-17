@@ -186,7 +186,7 @@ export function floorCodes(floors: Floor[]): Map<string, string> {
   return out;
 }
 
-export async function updateFloor(id: string, patch: Partial<Pick<Floor, 'name' | 'displayWidth' | 'code'>>): Promise<void> {
+export async function updateFloor(id: string, patch: Partial<Pick<Floor, 'name' | 'displayWidth' | 'code' | 'excludeFromReport'>>): Promise<void> {
   if (patch.code !== undefined) patch = { ...patch, code: cleanFloorCode(patch.code) };
   return tracked(async () => {
     const f = await db.floors.get(id);

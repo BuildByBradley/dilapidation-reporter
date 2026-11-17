@@ -288,6 +288,26 @@ describe('duplicate, backup and restore (A16, A17, A22)', () => {
     expect(await db.findings.get(f.id)).toBeDefined();
     expect((await repo.loadBundle(p.id)).blobs.size).toBeGreaterThan(0);
   });
+  it('a floor left out of the report drops out of the model and CSV, and survives duplicate and backup', async () => {
+    const { p, floors, cats } = await seeded();
+    await repo.createFinding({ floorId: floors[0].id, u: 0.3, v: 0.3, categoryId: cats[0].id, title: 'kept' });
+    await repo.createFinding({ floorId: floors[1].id, u: 0.5, v: 0.5, categoryId: cats[0].id, title: 'left out' });
+    await repo.updateFloor(floors[1].id, { excludeFromReport: true });
+    const m = buildReportModel(await repo.loadBundle(p.id));
+    expect(m.floors.map((f) => f.name)).toEqual(['Ground', 'Level 2', 'Level 3', 'Level 4']);
+    expect(m.total).toBe(1);
+    expect(m.byFloor.map((x) => x.floor)).not.toContain('Level 1');
+    const csv = buildCsv(m);
+    expect(csv).toContain('kept'); expect(csv).not.toContain('left out');
+    // the floor and its findings are still in the project itself
+    expect(await db.findings.where('floorId').equals(floors[1].id).count()).toBe(1);
+    const copy = await repo.duplicateProject(p.id);
+    expect((await repo.listFloors(copy.id))[1].excludeFromReport).toBe(true);
+    const restored = await repo.saveBundleAsNew(parseBackup(await createBackup(await repo.loadBundle(p.id))));
+    expect((await repo.listFloors(restored.id))[1].excludeFromReport).toBe(true);
+    await repo.updateFloor(floors[1].id, { excludeFromReport: false });
+    expect(buildReportModel(await repo.loadBundle(p.id)).total).toBe(2);
+  });
   it('round-trips through a zip backup into a new project', async () => {
     const { p } = await withData();
     const zip = await createBackup(await repo.loadBundle(p.id));
