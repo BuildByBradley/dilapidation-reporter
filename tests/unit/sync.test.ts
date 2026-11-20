@@ -176,26 +176,33 @@ describe('phone → PC live sync', () => {
     phone.engine.stop(); pc.engine.stop();
   });
 
-  it('manual mode uses no network until Sync now, and reports how much is waiting', async () => {
+  it('manual mode: the first start downloads the account; after that no network until Sync now, and reports how much is waiting', async () => {
     const statuses: { kind: string; pending?: number }[] = [];
     const db = new InspectorDb(`sync-manual-${++n}`);
     let calls = 0;
     const base = cloud.remote();
     const counting: Remote = Object.fromEntries(Object.entries(base).map(([k, f]) => [k, (...a: unknown[]) => { calls++; return (f as (...x: unknown[]) => unknown)(...a); }])) as unknown as Remote;
     const phone = new SyncEngine(db, counting, 'phone-manual', (st) => statuses.push(st as { kind: string; pending?: number }), () => true, 0, false);
-    await phone.start();
+    await phone.start(); // first start on this device: downloads what the account has (nothing here)
+    expect(calls).toBeGreaterThan(0);
+    phone.stop();
+    calls = 0;
+    const again = new SyncEngine(db, counting, 'phone-manual', (st) => statuses.push(st as { kind: string; pending?: number }), () => true, 0, false);
+    await again.start(); // later starts: no network
+    expect(calls).toBe(0);
+    const phone2 = again;
     await on(db, () => repo.createProject({ name: 'Quiet' }));
-    expect(await phone.count()).toBe(1 + 5 + 8); // project, 5 floors, 8 starter categories
+    expect(await phone2.count()).toBe(1 + 5 + 8); // project, 5 floors, 8 starter categories
     expect(calls).toBe(0);
     expect(cloud.records.size).toBe(0);
     expect(statuses.at(-1)).toMatchObject({ kind: 'manual', pending: 14 });
-    await phone.syncNow();
+    await phone2.syncNow();
     expect(cloud.records.size).toBe(14);
     expect(statuses.at(-1)).toMatchObject({ kind: 'manual', pending: 0 });
     // switching to automatic starts following live
-    await phone.setAuto(true);
+    await phone2.setAuto(true);
     expect(statuses.at(-1)?.kind).toBe('synced');
-    phone.stop();
+    phone2.stop();
   });
 
   it('a floor added on one device appears on the other', async () => {
@@ -348,7 +355,7 @@ describe('phone → PC live sync', () => {
     expect(await pcDb.blobs.count()).toBe(files);
     expect(cloud.maxDownloading).toBeGreaterThan(3);
     expect(Date.now() - t0).toBeLessThan(files * 40 * 0.6); // well under one-by-one time
-    expect(statuses.some((st) => st.kind === 'syncing' && st.pending > 10)).toBe(true);
+    expect(statuses.some((st) => st.kind === 'syncing' && (st.downloading ?? 0) > 10)).toBe(true);
     expect((await pcDb.photos.where('projectId').equals(p.id).count())).toBe(18);
     phone.engine.stop(); pc.stop();
   });

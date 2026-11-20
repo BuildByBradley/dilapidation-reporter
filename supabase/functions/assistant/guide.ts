@@ -66,6 +66,7 @@ Dilapidation Inspector records building-condition ("dilapidation") inspections o
 
 ## Sync between phone and computer (cloud)
 - Projects page → "Sync phone and computer": create an account (email + password, at least 6 characters) or sign in. Use the same account on every device.
+- After signing in on a device for the first time (or again after signing out), the account's projects download straight away, in either sync mode; the status shows "Downloading N files…" and each project appears as soon as its files are in.
 - Sync mode is set per device. Manual (default on phones): nothing is sent or received until you tap the "⟳ Sync now" button in the top bar, which shows how many changes are waiting — this saves mobile data. Automatic (default on computers): live, changes appear within seconds.
 - The status button in the top bar shows Synced · live, Syncing…, Offline · N waiting, or Sync problem (hover or tap for the reason).
 - Everything is saved on the device first, so the app works without signal; changes upload when you sync or come back online.
