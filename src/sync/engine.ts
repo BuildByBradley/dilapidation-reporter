@@ -35,7 +35,8 @@ export interface Remote {
 }
 
 export type SyncStatus =
-  | { kind: 'syncing'; pending: number }
+  /** `downloading`: files still to download from the cloud (first download of a project can be hundreds). */
+  | { kind: 'syncing'; pending: number; downloading?: number }
   | { kind: 'synced'; at: string; live: boolean }
   | { kind: 'offline'; pending: number }
   /** `problems`: what could not be uploaded and why (everything else was). */
@@ -68,6 +69,8 @@ const BLOB = 'blobs';
 const CURSOR = 'cursor';
 const MISSING = 'missingBlobs';
 const LAST_SYNC = 'lastSync';
+/** Set once this device has downloaded the account at least once (cleared with the device on sign-out). */
+const PULLED = 'pulledOnce';
 /** Re-read a little before the cursor: a transaction can commit after a later one started. Applying is idempotent. */
 const CURSOR_OVERLAP_MS = 2 * 60 * 1000;
 /** Parallel file downloads: enough to hide the round trip to the cloud, few enough for a phone on mobile data. */
@@ -142,7 +145,12 @@ export class SyncEngine {
   async start(): Promise<void> {
     this.db.changeListeners.add(this.onChange);
     this.lastSync = (await this.db.meta.get(LAST_SYNC))?.value;
-    if (!this.auto) { await this.count(); return; }
+    if (!this.auto) {
+      // Manual mode waits for "Sync now" — except the first time on this device (new device, or just signed in again,
+      // which clears it): the account's projects are downloaded straight away, or the device would look empty.
+      if (!(await this.db.meta.get(PULLED))) { await this.syncNow(); return; }
+      await this.count(); return;
+    }
     this.report({ kind: 'syncing', pending: 0 });
     try { await this.pull(); } catch (e) { this.fail(e); }
     await this.push();
@@ -219,18 +227,31 @@ export class SyncEngine {
     await this.remote.ready?.();
     const rows = await this.remote.fetchSince(since);
     await this.enqueue(() => this.retryMissing());
-    if (!rows.length) return;
-    // Files first, several at a time (one by one, a project with hundreds of photos takes many minutes on a phone).
-    await this.prefetchBlobs(rows.filter((r) => r.kind === 'assets' && !r.deleted && r.data && r.device !== this.device)
-      .flatMap((r) => assetBlobIds(r.data as Asset).map((id) => ({ id, projectId: (r.data as Asset).projectId }))));
+    if (!rows.length) { await this.db.meta.put({ key: PULLED, value: '1' }); return; }
     // Parents before children; deletions after everything, children first.
     const ordered = [...rows].sort((a, b) =>
       Number(a.deleted) - Number(b.deleted)
       || (a.deleted ? RANK.get(b.kind)! - RANK.get(a.kind)! : RANK.get(a.kind)! - RANK.get(b.kind)!)
       || a.updated_at.localeCompare(b.updated_at));
-    await this.enqueue(async () => { for (const r of ordered) await this.apply(r); });
+    // Project by project: its files first, several at a time, then its records, so each project appears as soon as
+    // its own files are in (a first download can be hundreds of photos).
+    const byProject = new Map<string, RemoteRecord[]>();
+    for (const r of ordered) byProject.set(r.project_id, [...(byProject.get(r.project_id) ?? []), r]);
+    const files = new Map<string, { id: string; projectId: string }[]>();
+    for (const [pid, rs] of byProject) {
+      files.set(pid, await this.missingFiles(rs.filter((r) => r.kind === 'assets' && !r.deleted && r.data && r.device !== this.device)
+        .flatMap((r) => assetBlobIds(r.data as Asset).map((id) => ({ id, projectId: (r.data as Asset).projectId })))));
+    }
+    let later = [...files.values()].reduce((n, f) => n + f.length, 0);
+    for (const [pid, rs] of byProject) {
+      const mine = files.get(pid)!;
+      later -= mine.length;
+      await this.prefetchBlobs(mine, later);
+      await this.enqueue(async () => { for (const r of rs) await this.apply(r); });
+    }
     const latest = rows.reduce((m, r) => (r.updated_at > m ? r.updated_at : m), cursor ?? '');
     await this.db.meta.put({ key: CURSOR, value: latest });
+    await this.db.meta.put({ key: PULLED, value: '1' });
   }
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
@@ -296,7 +317,8 @@ export class SyncEngine {
    * Download files this device does not have yet, DOWNLOADS_AT_ONCE at a time, reporting progress. Files that are not
    * in the cloud yet, or fail, are left for the usual one-by-one path (which records and retries them).
    */
-  private async prefetchBlobs(items: { id: string; projectId: string }[]) {
+  /** The files in `items` this device does not have yet (each once). */
+  private async missingFiles(items: { id: string; projectId: string }[]) {
     const ids = new Set<string>();
     const todo: { id: string; projectId: string }[] = [];
     for (const it of items) {
@@ -304,10 +326,15 @@ export class SyncEngine {
       ids.add(it.id);
       if (!(await this.db.blobs.get(it.id))) todo.push(it);
     }
+    return todo;
+  }
+  /** `after`: files still to come after these (added to the count shown). */
+  private async prefetchBlobs(items: { id: string; projectId: string }[], after = 0) {
+    const todo = await this.missingFiles(items);
     if (!todo.length) return;
-    let left = todo.length;
+    let left = todo.length + after;
     const work = [...todo];
-    this.report({ kind: 'syncing', pending: left });
+    this.report({ kind: 'syncing', pending: this.pending, downloading: left });
     await Promise.all(Array.from({ length: DOWNLOADS_AT_ONCE }, async () => {
       for (let it = work.shift(); it && !this.stopped; it = work.shift()) {
         try {
@@ -317,7 +344,7 @@ export class SyncEngine {
             await this.db.sync.put({ key: key(BLOB, it.id), kind: BLOB, id: it.id, projectId: it.projectId, hash: 'stored' });
           }
         } catch { /* retried by apply() */ }
-        this.report({ kind: 'syncing', pending: --left });
+        this.report({ kind: 'syncing', pending: this.pending, downloading: --left });
       }
     }));
   }
