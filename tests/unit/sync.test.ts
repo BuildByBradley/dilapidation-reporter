@@ -324,6 +324,31 @@ describe('phone → PC live sync', () => {
     phone.stop();
   }, 15000);
 
+  it('a deletion the cloud refuses does not hold back other deletions, is explained, stops retrying, and the project comes back', async () => {
+    const statuses: SyncStatus[] = [];
+    const db = new InspectorDb(`sync-tab-${++n}`); dbs.push(db);
+    const tab = new SyncEngine(db, cloud.remote(), 'tab-z', (st) => statuses.push(st), () => cloud.online, 0, false);
+    const { keep, gone } = await on(db, async () => ({ keep: await repo.createProject({ name: 'Not mine to delete' }), gone: await repo.createProject({ name: 'Old copy' }) }));
+    await tab.start(); await tab.syncNow();
+    expect(cloud.records.get(`projects:${keep.id}`)?.deleted).toBe(false);
+    cloud.refuseRecord = (r) => (r.deleted && r.project_id === keep.id ? 'new row violates row-level security policy for table "records"' : null);
+    await on(db, async () => { await repo.deleteProject(keep.id); await repo.deleteProject(gone.id); });
+    await tab.syncNow();
+    // the other project's deletion still went through
+    expect(cloud.records.get(`projects:${gone.id}`)?.deleted).toBe(true);
+    expect(cloud.records.get(`projects:${keep.id}`)?.deleted).toBe(false);
+    const st = statuses.at(-1)!;
+    expect(st.kind).toBe('error');
+    if (st.kind === 'error') expect(st.problems?.join(' ')).toMatch(/Could not delete .*from the cloud.*Leave/);
+    // next sync: nothing left waiting, and the cloud copy is back on this device
+    await tab.syncNow(); await tab.idle();
+    expect(statuses.at(-1)!.kind).toBe('manual');
+    expect((await db.projects.get(keep.id))?.name).toBe('Not mine to delete');
+    expect(await db.floors.where('projectId').equals(keep.id).count()).toBe(5);
+    expect(await db.projects.get(gone.id)).toBeUndefined();
+    tab.stop();
+  }, 15000);
+
   it('a device catching up downloads files several at a time and reports how many are left', async () => {
     const phone = device('phone');
     const p = await on(phone.db, async () => {

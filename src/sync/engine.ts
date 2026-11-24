@@ -240,10 +240,12 @@ export class SyncEngine {
   }
 
   private async apply(r: RemoteRecord): Promise<void> {
-    if (r.device === this.device || !RANK.has(r.kind)) return; // our own echo
+    if (!RANK.has(r.kind)) return;
     const table = this.db.table(r.kind);
     const k = key(r.kind, r.id);
     const [local, st] = await Promise.all([table.get(r.id), this.db.sync.get(k)]);
+    // our own echo — unless this device no longer has it at all (a full re-read after a refused deletion)
+    if (r.device === this.device && (local || st || r.deleted)) return;
     if (local && st && hashRow(local) !== st.hash) return; // unsynced local edit wins; it is uploaded next
     if (!local && st && !r.deleted) return; // deleted here but not yet uploaded: the deletion wins
     if (r.deleted) {
@@ -486,13 +488,43 @@ export class SyncEngine {
       }
     }
     // 3. Deletions as tombstones, children first; then their files.
-    try {
-      for (let i = 0; i < goneRecords.length; i += 200) {
-        const chunk = goneRecords.slice(i, i + 200);
-        await withRetry(() => this.remote.upsert(chunk.map((s) => ({ kind: s.kind as Kind, id: s.id, project_id: s.projectId, data: null, deleted: true, device: this.device }))));
+    const tomb = (s: SyncRow): RecordRow => ({ kind: s.kind as Kind, id: s.id, project_id: s.projectId, data: null, deleted: true, device: this.device });
+    const refused = (e: unknown) => !isTransient(e) && /row-level security|violates.*policy|permission denied|not authori[sz]ed|\b403\b/i.test(String((e as Error)?.message ?? e));
+    const refusedProjects = new Set<string>();
+    for (let i = 0; i < goneRecords.length; i += 200) {
+      const chunk = goneRecords.slice(i, i + 200);
+      try {
+        await withRetry(() => this.remote.upsert(chunk.map(tomb)));
         await this.db.sync.bulkDelete(chunk.map((s) => s.key));
         this.tick(chunk.length);
+      } catch (e) {
+        if (!refused(e)) { problem('a deletion', e); continue; }
+        // One refused deletion must not hold back the others: send them one by one.
+        for (const s of chunk) {
+          try {
+            await withRetry(() => this.remote.upsert([tomb(s)]));
+            await this.db.sync.delete(s.key);
+            this.tick();
+          } catch (e1) {
+            if (!refused(e1)) { problem('a deletion', e1); continue; }
+            // The cloud will never accept this deletion (someone else's project, or view-only access). Stop
+            // retrying it: forget it here, so the cloud's copy simply comes back on the next sync.
+            await this.db.sync.delete(s.key);
+            refusedProjects.add(s.projectId);
+          }
+        }
       }
+    }
+    if (refusedProjects.size) {
+      // its files are not ours to delete either; and re-read the cloud so the project comes back in full
+      for (const b of goneBlobs.filter((x) => refusedProjects.has(x.projectId))) await this.db.sync.delete(b.key);
+      goneBlobs.splice(0, goneBlobs.length, ...goneBlobs.filter((x) => !refusedProjects.has(x.projectId)));
+      await this.db.meta.delete(CURSOR);
+      const names = await Promise.all([...refusedProjects].map(async (id) => (await this.db.projects.get(id))?.name));
+      const which = names.every(Boolean) ? names.map((n) => `“${n}”`).join(', ') : 'a project';
+      problems.set('refused-delete', `Could not delete ${which} from the cloud: it belongs to another account, or you only have view access. It will come back on the next sync. To remove a shared project from your devices only, use Leave on the projects page.`);
+    }
+    try {
       if (goneBlobs.length) {
         await withRetry(() => this.remote.deleteBlobs(goneBlobs.map((s) => ({ id: s.id, projectId: s.projectId }))));
         await this.db.sync.bulkDelete(goneBlobs.map((s) => s.key));
