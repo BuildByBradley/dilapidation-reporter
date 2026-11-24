@@ -11,7 +11,7 @@ import { SaveIndicator } from '../../components/SaveIndicator';
 import { CloudPanel, CloudStatus } from '../../components/Cloud';
 import { StorageBar } from '../../components/StorageBar';
 import { HelpButton } from '../../components/Help';
-import { clearDevice, currentInspector, leaveProject, useDeviceLock, useProjectRole } from '../../sync/cloud';
+import { clearDevice, currentInspector, leaveProject, useCloudState, useDeviceLock, useProjectRole } from '../../sync/cloud';
 import { InspectorField, LogoField } from './ProjectFields';
 
 type Details = Required<Omit<repo.ProjectInput, 'summary'>>;
@@ -80,6 +80,7 @@ function DeleteOrLeave({ project, onDelete, onLeave }: { project: repo.ProjectSu
 export function ProjectHome() {
   const toast = useToast();
   const [projects] = useLive(() => repo.listProjects(), [], [] as repo.ProjectSummary[]);
+  const cloud = useCloudState();
   const [editing, setEditing] = useState<repo.ProjectSummary | 'new' | null>(null);
   const [deleting, setDeleting] = useState<repo.ProjectSummary | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -151,7 +152,10 @@ export function ProjectHome() {
           }} />
         </div>
         {busy && <p className="busy" role="status">{busy}</p>}
-        {projects.length === 0 ? (
+        {projects.length === 0 && cloud.kind === 'syncing' ? (
+          <div className="empty" role="status" data-testid="downloading-projects"><h2>Downloading your projects…</h2>
+            <p>{cloud.downloading ? `${cloud.downloading} plan and photo file${cloud.downloading === 1 ? '' : 's'} to go. ` : ''}Your projects appear here as soon as their files are in. Keep the app open; on mobile data this can take a few minutes.</p></div>
+        ) : projects.length === 0 ? (
           <div className="empty"><h2>No inspections yet</h2><p>Create an inspection, or load the synthetic five-floor sample project to try the app.</p></div>
         ) : (
           <ul className="cards" aria-label="Projects">

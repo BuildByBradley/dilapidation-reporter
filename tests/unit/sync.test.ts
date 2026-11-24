@@ -176,26 +176,33 @@ describe('phone → PC live sync', () => {
     phone.engine.stop(); pc.engine.stop();
   });
 
-  it('manual mode uses no network until Sync now, and reports how much is waiting', async () => {
+  it('manual mode: the first start downloads the account; after that no network until Sync now, and reports how much is waiting', async () => {
     const statuses: { kind: string; pending?: number }[] = [];
     const db = new InspectorDb(`sync-manual-${++n}`);
     let calls = 0;
     const base = cloud.remote();
     const counting: Remote = Object.fromEntries(Object.entries(base).map(([k, f]) => [k, (...a: unknown[]) => { calls++; return (f as (...x: unknown[]) => unknown)(...a); }])) as unknown as Remote;
     const phone = new SyncEngine(db, counting, 'phone-manual', (st) => statuses.push(st as { kind: string; pending?: number }), () => true, 0, false);
-    await phone.start();
+    await phone.start(); // first start on this device: downloads what the account has (nothing here)
+    expect(calls).toBeGreaterThan(0);
+    phone.stop();
+    calls = 0;
+    const again = new SyncEngine(db, counting, 'phone-manual', (st) => statuses.push(st as { kind: string; pending?: number }), () => true, 0, false);
+    await again.start(); // later starts: no network
+    expect(calls).toBe(0);
+    const phone2 = again;
     await on(db, () => repo.createProject({ name: 'Quiet' }));
-    expect(await phone.count()).toBe(1 + 5 + 8); // project, 5 floors, 8 starter categories
+    expect(await phone2.count()).toBe(1 + 5 + 8); // project, 5 floors, 8 starter categories
     expect(calls).toBe(0);
     expect(cloud.records.size).toBe(0);
     expect(statuses.at(-1)).toMatchObject({ kind: 'manual', pending: 14 });
-    await phone.syncNow();
+    await phone2.syncNow();
     expect(cloud.records.size).toBe(14);
     expect(statuses.at(-1)).toMatchObject({ kind: 'manual', pending: 0 });
     // switching to automatic starts following live
-    await phone.setAuto(true);
+    await phone2.setAuto(true);
     expect(statuses.at(-1)?.kind).toBe('synced');
-    phone.stop();
+    phone2.stop();
   });
 
   it('a floor added on one device appears on the other', async () => {
@@ -324,6 +331,31 @@ describe('phone → PC live sync', () => {
     phone.stop();
   }, 15000);
 
+  it('a deletion the cloud refuses does not hold back other deletions, is explained, stops retrying, and the project comes back', async () => {
+    const statuses: SyncStatus[] = [];
+    const db = new InspectorDb(`sync-tab-${++n}`); dbs.push(db);
+    const tab = new SyncEngine(db, cloud.remote(), 'tab-z', (st) => statuses.push(st), () => cloud.online, 0, false);
+    const { keep, gone } = await on(db, async () => ({ keep: await repo.createProject({ name: 'Not mine to delete' }), gone: await repo.createProject({ name: 'Old copy' }) }));
+    await tab.start(); await tab.syncNow();
+    expect(cloud.records.get(`projects:${keep.id}`)?.deleted).toBe(false);
+    cloud.refuseRecord = (r) => (r.deleted && r.project_id === keep.id ? 'new row violates row-level security policy for table "records"' : null);
+    await on(db, async () => { await repo.deleteProject(keep.id); await repo.deleteProject(gone.id); });
+    await tab.syncNow();
+    // the other project's deletion still went through
+    expect(cloud.records.get(`projects:${gone.id}`)?.deleted).toBe(true);
+    expect(cloud.records.get(`projects:${keep.id}`)?.deleted).toBe(false);
+    const st = statuses.at(-1)!;
+    expect(st.kind).toBe('error');
+    if (st.kind === 'error') expect(st.problems?.join(' ')).toMatch(/Could not delete .*from the cloud.*Leave/);
+    // next sync: nothing left waiting, and the cloud copy is back on this device
+    await tab.syncNow(); await tab.idle();
+    expect(statuses.at(-1)!.kind).toBe('manual');
+    expect((await db.projects.get(keep.id))?.name).toBe('Not mine to delete');
+    expect(await db.floors.where('projectId').equals(keep.id).count()).toBe(5);
+    expect(await db.projects.get(gone.id)).toBeUndefined();
+    tab.stop();
+  }, 15000);
+
   it('a device catching up downloads files several at a time and reports how many are left', async () => {
     const phone = device('phone');
     const p = await on(phone.db, async () => {
@@ -348,7 +380,7 @@ describe('phone → PC live sync', () => {
     expect(await pcDb.blobs.count()).toBe(files);
     expect(cloud.maxDownloading).toBeGreaterThan(3);
     expect(Date.now() - t0).toBeLessThan(files * 40 * 0.6); // well under one-by-one time
-    expect(statuses.some((st) => st.kind === 'syncing' && st.pending > 10)).toBe(true);
+    expect(statuses.some((st) => st.kind === 'syncing' && (st.downloading ?? 0) > 10)).toBe(true);
     expect((await pcDb.photos.where('projectId').equals(p.id).count())).toBe(18);
     phone.engine.stop(); pc.stop();
   });

@@ -18,7 +18,9 @@ function describe(s: CloudState): { text: string; tone: 'ok' | 'busy' | 'warn' |
     case 'signedOut': return { text: 'Not syncing', tone: 'off', detail: 'Sign in on the projects page to sync between your phone and computer.' };
     case 'mfa': return { text: 'Enter your code', tone: 'warn', detail: 'Open the projects page and enter the 6-digit code from your authenticator app to finish signing in.' };
     case 'mfaSetup': return { text: 'Set up two-factor', tone: 'warn', detail: 'Two-factor sign-in is required. Open the projects page to set it up.' };
-    case 'syncing': return { text: s.pending ? `Syncing ${s.pending}…` : 'Syncing…', tone: 'busy' };
+    case 'syncing': return s.downloading
+      ? { text: `Downloading ${s.downloading} file${s.downloading === 1 ? '' : 's'}…`, tone: 'busy', detail: 'Plans and photos are coming down from the cloud. Projects appear when their files are in.' }
+      : { text: s.pending ? `Syncing ${s.pending}…` : 'Syncing…', tone: 'busy' };
     case 'synced': return { text: s.live ? 'Synced · live' : 'Synced', tone: 'ok', detail: `Signed in as ${s.email}. Last synced ${new Date(s.at).toLocaleTimeString()}.` };
     case 'offline': return { text: `Offline · ${s.pending} waiting`, tone: 'warn', detail: 'Changes are safe on this device and upload when you are back online.' };
     case 'error': return { text: 'Sync problem', tone: 'bad', detail: `${s.message}${s.pending ? ` — ${s.pending} changes waiting` : ''}.` };
